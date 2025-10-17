@@ -4,7 +4,31 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#pragma once
+/**
+ * @file esp_schedule_untyped.h
+ * @brief Untyped interface for the esp_schedule component
+ *
+ * This interface is used to create and manage schedules without specifying the return type.
+ * This is useful for cases where the return type is build-specific (e.g., esp_err_t or something else).
+ * @note You should not use this header file directly. Instead include this header file, and define the following:
+ * - ESP_SCHEDULE_RETURN_TYPE to the return type you want to use.
+ * - The following return values MUST be defined:
+ *   - ESP_SCHEDULE_RET_OK           : Success.
+ *   - ESP_SCHEDULE_RET_FAIL         : Failure.
+ *   - ESP_SCHEDULE_RET_NO_MEM       : No memory.
+ *   - ESP_SCHEDULE_RET_INVALID_ARG  : Invalid argument.
+ *   - ESP_SCHEDULE_RET_INVALID_STATE: Invalid state.
+ *   - ESP_SCHEDULE_RET_NVS_NOT_FOUND: NVS not found.
+ * - The following logging function macros MUST be defined:
+ *   - ESP_SCHEDULE_LOGE(tag, fmt, ...) : Log an error message.
+ *   - ESP_SCHEDULE_LOGW(tag, fmt, ...) : Log a warning message.
+ *   - ESP_SCHEDULE_LOGI(tag, fmt, ...) : Log an info message.
+ *   - ESP_SCHEDULE_LOGD(tag, fmt, ...) : Log a debug message.
+ *   - ESP_SCHEDULE_LOGV(tag, fmt, ...) : Log a verbose message.
+ */
+
+#ifndef __ESP_SCHEDULE_UNTYPED_H__
+#define __ESP_SCHEDULE_UNTYPED_H__
 
 #ifdef __cplusplus
 extern "C" {
@@ -188,10 +212,10 @@ esp_schedule_handle_t esp_schedule_create(esp_schedule_config_t *schedule_config
  *
  * @param[in] handle Schedule handle for the schedule to be removed.
  *
- * @return ESP_OK on success.
+ * @return ESP_SCHEDULE_RET_OK on success.
  * @return error in case of failure.
  */
-esp_err_t esp_schedule_delete(esp_schedule_handle_t handle);
+ESP_SCHEDULE_RETURN_TYPE esp_schedule_delete(esp_schedule_handle_t handle);
 
 /** Edit Schedule
  *
@@ -205,10 +229,10 @@ esp_err_t esp_schedule_delete(esp_schedule_handle_t handle);
  * @param[in] handle Schedule handle for the schedule to be edited.
  * @param[in] schedule_config Configuration of the schedule to be edited.
  *
- * @return ESP_OK on success.
+ * @return ESP_SCHEDULE_RET_OK on success.
  * @return error in case of failure.
  */
-esp_err_t esp_schedule_edit(esp_schedule_handle_t handle, esp_schedule_config_t *schedule_config);
+ESP_SCHEDULE_RETURN_TYPE esp_schedule_edit(esp_schedule_handle_t handle, esp_schedule_config_t *schedule_config);
 
 /** Enable Schedule
  *
@@ -218,10 +242,10 @@ esp_err_t esp_schedule_edit(esp_schedule_handle_t handle, esp_schedule_config_t 
  *
  * @param[in] handle Schedule handle for the schedule to be enabled.
  *
- * @return ESP_OK on success.
+ * @return ESP_SCHEDULE_RET_OK on success.
  * @return error in case of failure.
  */
-esp_err_t esp_schedule_enable(esp_schedule_handle_t handle);
+ESP_SCHEDULE_RETURN_TYPE esp_schedule_enable(esp_schedule_handle_t handle);
 
 /** Disable Schedule
  *
@@ -231,10 +255,10 @@ esp_err_t esp_schedule_enable(esp_schedule_handle_t handle);
  *
  * @param[in] handle Schedule handle for the schedule to be disabled.
  *
- * @return ESP_OK on success.
+ * @return ESP_SCHEDULE_RET_OK on success.
  * @return error in case of failure.
  */
-esp_err_t esp_schedule_disable(esp_schedule_handle_t handle);
+ESP_SCHEDULE_RETURN_TYPE esp_schedule_disable(esp_schedule_handle_t handle);
 
 /** Get Schedule
  *
@@ -244,11 +268,13 @@ esp_err_t esp_schedule_disable(esp_schedule_handle_t handle);
  * @param[in] handle Schedule handle.
  * @param[out] schedule_config Details of the schedule whose handle is passed.
  *
- * @return ESP_OK on success.
+ * @return ESP_SCHEDULE_RET_OK on success.
  * @return error in case of failure.
  */
-esp_err_t esp_schedule_get(esp_schedule_handle_t handle, esp_schedule_config_t *schedule_config);
+ESP_SCHEDULE_RETURN_TYPE esp_schedule_get(esp_schedule_handle_t handle, esp_schedule_config_t *schedule_config);
 
 #ifdef __cplusplus
 }
 #endif
+
+#endif // __ESP_SCHEDULE_UNTYPED_H__
