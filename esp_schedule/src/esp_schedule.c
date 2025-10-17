@@ -6,8 +6,8 @@
 #include <string.h>
 #include <inttypes.h>
 #include <esp_log.h>
-#include <esp_sntp.h>
 #include <esp_rmaker_utils.h>
+#include <glue_time.h>
 #include <esp_daylight.h>
 #include "esp_schedule_internal.h"
 
@@ -225,7 +225,7 @@ static uint32_t esp_schedule_get_next_schedule_time_diff(const char *schedule_na
     int32_t time_diff;
 
     /* Get current time */
-    time(&now);
+    esp_schedule_get_time(&now);
     /* Handling ESP_SCHEDULE_TYPE_RELATIVE first since it doesn't require any
      * computation based on days, hours, minutes, etc.
      */
@@ -476,7 +476,7 @@ static bool esp_schedule_is_expired(esp_schedule_trigger_t *trigger)
 {
     time_t current_timestamp = 0;
     struct tm current_time = {0};
-    time(&current_timestamp);
+    esp_schedule_get_time(&current_timestamp);
     localtime_r(&current_timestamp, &current_time);
 
     if (trigger->type == ESP_SCHEDULE_TYPE_RELATIVE) {
@@ -555,7 +555,7 @@ static void esp_schedule_stop_timer(esp_schedule_t *schedule)
 static void esp_schedule_start_timer(esp_schedule_t *schedule)
 {
     time_t current_time = 0;
-    time(&current_time);
+    esp_schedule_get_time(&current_time);
     if (current_time < SECONDS_TILL_2020) {
         ESP_SCHEDULE_LOGE(TAG, "Time is not updated");
         return;
@@ -588,7 +588,7 @@ static void esp_schedule_common_timer_cb(void *priv_data)
 {
     esp_schedule_t *schedule = (esp_schedule_t *)priv_data;
     time_t now;
-    time(&now);
+    esp_schedule_get_time(&now);
     struct tm validity_time;
     char time_str[64] = {0};
     if (schedule->validity.start_time != 0) {
@@ -792,18 +792,11 @@ esp_schedule_handle_t esp_schedule_create(esp_schedule_config_t *schedule_config
 
 esp_schedule_handle_t *esp_schedule_init(bool enable_nvs, char *nvs_partition, uint8_t *schedule_count)
 {
-    if (!esp_sntp_enabled()) {
-        ESP_SCHEDULE_LOGI(TAG, "Initializing SNTP");
-        esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
-        esp_sntp_setservername(0, "pool.ntp.org");
-        esp_sntp_init();
-    }
+    esp_schedule_timesync_init();
 
     if (!enable_nvs) {
         return NULL;
     }
-
-    /* Wait for time to be updated here */
 
     /* Below this is initialising schedules from NVS */
     esp_schedule_nvs_init(nvs_partition);

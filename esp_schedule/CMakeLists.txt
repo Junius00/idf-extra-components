@@ -1,6 +1,7 @@
 set(component_srcs "src/esp_schedule.c"
                    "src/esp_schedule_nvs.c"
                    "glue/esp/nvs.c"
+                   "glue/esp/time.c"
                    "glue/esp/timer.c")
 set(component_include_dirs "include/common"
                           "include/esp"
