@@ -24,6 +24,7 @@ typedef struct esp_schedule {
 
 ESP_SCHEDULE_RETURN_TYPE esp_schedule_nvs_add(esp_schedule_t *schedule);
 ESP_SCHEDULE_RETURN_TYPE esp_schedule_nvs_remove(esp_schedule_t *schedule);
+ESP_SCHEDULE_RETURN_TYPE esp_schedule_nvs_remove_all(void);
 esp_schedule_handle_t *esp_schedule_nvs_get_all(uint8_t *schedule_count);
 bool esp_schedule_nvs_is_enabled(void);
 ESP_SCHEDULE_RETURN_TYPE esp_schedule_nvs_init(char *nvs_partition);
