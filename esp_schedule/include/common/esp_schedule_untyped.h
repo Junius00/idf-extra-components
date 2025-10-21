@@ -219,6 +219,19 @@ esp_schedule_handle_t esp_schedule_create(esp_schedule_config_t *schedule_config
  */
 ESP_SCHEDULE_RETURN_TYPE esp_schedule_delete(esp_schedule_handle_t handle);
 
+/** Delete All Schedules
+
+ * This API can be used to delete all schedules.
+ * @note This API will indiscriminately erase the NVS namespace used to store schedule data, irregardless of whether all schedule handles have been deleted or not.
+ *
+ * @param[in] handle_list List of schedule handles to be deleted.
+ * @param[in] schedule_count Number of schedules to be deleted.
+ *
+ * @return ESP_SCHEDULE_RET_OK on success.
+ * @return error in case of failure.
+ */
+ESP_SCHEDULE_RETURN_TYPE esp_schedule_delete_all(esp_schedule_handle_t *handle_list, uint8_t schedule_count);
+
 /** Edit Schedule
  *
  * This API can be used to edit an existing schedule.

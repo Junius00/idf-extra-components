@@ -575,6 +575,23 @@ ESP_SCHEDULE_RETURN_TYPE esp_schedule_edit(esp_schedule_handle_t handle, esp_sch
     return ESP_SCHEDULE_RET_OK;
 }
 
+static void esp_schedule_free_schedule(esp_schedule_t *schedule)
+{
+    if (schedule == NULL) {
+        return;
+    }
+    if (schedule->timer) {
+        esp_schedule_stop_timer(schedule);
+        esp_schedule_delete_timer(schedule);
+    }
+    if (schedule->triggers.list) {
+        ESP_SCHEDULE_FREE(schedule->triggers.list);
+        schedule->triggers.list = NULL;
+        schedule->triggers.count = 0;
+    }
+    ESP_SCHEDULE_FREE(schedule);
+}
+
 ESP_SCHEDULE_RETURN_TYPE esp_schedule_delete(esp_schedule_handle_t handle)
 {
     if (handle == NULL) {
@@ -582,17 +599,17 @@ ESP_SCHEDULE_RETURN_TYPE esp_schedule_delete(esp_schedule_handle_t handle)
     }
     esp_schedule_t *schedule = (esp_schedule_t *)handle;
     ESP_SCHEDULE_LOGI(TAG, "Deleting schedule %s", schedule->name);
-    if (schedule->timer) {
-        esp_schedule_stop_timer(schedule);
-        esp_schedule_delete_timer(schedule);
-    }
     esp_schedule_nvs_remove(schedule);
-    if (schedule->triggers.list) {
-        ESP_SCHEDULE_FREE(schedule->triggers.list);
-        schedule->triggers.list = NULL;
-        schedule->triggers.count = 0;
+    esp_schedule_free_schedule(schedule);
+    return ESP_SCHEDULE_RET_OK;
+}
+
+ESP_SCHEDULE_RETURN_TYPE esp_schedule_delete_all(esp_schedule_handle_t *handle_list, uint8_t schedule_count)
+{
+    esp_schedule_nvs_remove_all();
+    for (uint8_t i = 0; i < schedule_count; i++) {
+        esp_schedule_free_schedule(handle_list[i]);
     }
-    ESP_SCHEDULE_FREE(schedule);
     return ESP_SCHEDULE_RET_OK;
 }
 

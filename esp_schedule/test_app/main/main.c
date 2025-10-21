@@ -516,6 +516,52 @@ static void test_nvs_schedule_with_multiple_triggers(void)
     free(config.triggers.list);
 }
 
+static void test_nvs_delete_all(void)
+{
+    // Create multiple schedules for bulk deletion test
+    esp_schedule_config_t configs[3] = {0};
+    esp_schedule_handle_t handles[3] = {NULL, NULL, NULL};
+    const char* names[3] = {"delete_test1", "delete_test2", "delete_test3"};
+
+    for (int i = 0; i < 3; i++) {
+        strcpy(configs[i].name, names[i]);
+        configs[i].triggers.count = 1;
+        configs[i].triggers.list = (esp_schedule_trigger_t*)malloc(sizeof(esp_schedule_trigger_t));
+        configs[i].triggers.list[0].type = ESP_SCHEDULE_TYPE_DAYS_OF_WEEK;
+        configs[i].triggers.list[0].hours = 9 + i;
+        configs[i].triggers.list[0].minutes = i * 10;
+        configs[i].triggers.list[0].day.repeat_days = ESP_SCHEDULE_DAY_MONDAY;
+        configs[i].validity.start_time = 0;
+        configs[i].validity.end_time = 2147483647;
+
+        handles[i] = esp_schedule_create(&configs[i]);
+        TEST_ASSERT_NOT_NULL_MESSAGE(handles[i], "Failed to create schedule");
+    }
+
+    // Verify schedules were added to NVS
+    uint8_t count_before = 0;
+    esp_schedule_handle_t* all_handles_before = esp_schedule_nvs_get_all(&count_before);
+    TEST_ASSERT_NOT_NULL_MESSAGE(all_handles_before, "Failed to get schedules from NVS");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(3, count_before, "Should have 3 schedules before delete_all");
+
+    // Test esp_schedule_delete_all with our handles
+    ESP_SCHEDULE_RETURN_TYPE result = esp_schedule_delete_all(handles, 3);
+    TEST_ASSERT_EQUAL_MESSAGE(ESP_SCHEDULE_RET_OK, result, "esp_schedule_delete_all should succeed");
+
+    // Verify schedules were deleted from NVS
+    uint8_t count_after = 0;
+    esp_schedule_handle_t* all_handles_after = esp_schedule_nvs_get_all(&count_after);
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(0, count_after, "Should have 0 schedules after delete_all");
+
+    if (all_handles_after) {
+        free(all_handles_after);
+    }
+    free(all_handles_before);
+    for (int i = 0; i < 3; i++) {
+        free(configs[i].triggers.list);
+    }
+}
+
 void app_main(void)
 {
     UNITY_BEGIN();
@@ -552,6 +598,7 @@ void app_main(void)
     RUN_TEST(test_nvs_basic_operations);
     RUN_TEST(test_nvs_multiple_schedules);
     RUN_TEST(test_nvs_schedule_with_multiple_triggers);
+    RUN_TEST(test_nvs_delete_all);
 
 #if CONFIG_ESP_SCHEDULE_ENABLE_DAYLIGHT
     RUN_TEST(test_solar_with_dow);
