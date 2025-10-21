@@ -8,9 +8,9 @@
 #include <stdbool.h>
 #include <time.h>
 #include <inttypes.h>
-#include <esp_log.h>
-#include <esp_rmaker_utils.h>
 #include <glue_time.h>
+#include <glue_log.h>
+#include <glue_mem.h>
 #include <esp_daylight.h>
 #include "esp_schedule_internal.h"
 
@@ -531,13 +531,13 @@ static ESP_SCHEDULE_RETURN_TYPE esp_schedule_set(esp_schedule_t *schedule, esp_s
 {
     /* Deep copy trigger list from config, freeing previous if any. */
     if (schedule->triggers.list) {
-        free(schedule->triggers.list);
+        ESP_SCHEDULE_FREE(schedule->triggers.list);
         schedule->triggers.list = NULL;
         schedule->triggers.count = 0;
     }
     if (schedule_config->triggers.count > 0 && schedule_config->triggers.list != NULL) {
         size_t bytes = (size_t)schedule_config->triggers.count * sizeof(esp_schedule_trigger_t);
-        esp_schedule_trigger_t *copy = (esp_schedule_trigger_t *)MEM_CALLOC_EXTRAM(1, bytes);
+        esp_schedule_trigger_t *copy = (esp_schedule_trigger_t *)ESP_SCHEDULE_CALLOC(1, bytes);
         if (copy == NULL) {
             return ESP_SCHEDULE_RET_NO_MEM;
         }
@@ -588,11 +588,11 @@ ESP_SCHEDULE_RETURN_TYPE esp_schedule_delete(esp_schedule_handle_t handle)
     }
     esp_schedule_nvs_remove(schedule);
     if (schedule->triggers.list) {
-        free(schedule->triggers.list);
+        ESP_SCHEDULE_FREE(schedule->triggers.list);
         schedule->triggers.list = NULL;
         schedule->triggers.count = 0;
     }
-    free(schedule);
+    ESP_SCHEDULE_FREE(schedule);
     return ESP_SCHEDULE_RET_OK;
 }
 
@@ -612,7 +612,7 @@ esp_schedule_handle_t esp_schedule_create(esp_schedule_config_t *schedule_config
         return NULL;
     }
 
-    esp_schedule_t *schedule = (esp_schedule_t *)MEM_CALLOC_EXTRAM(1, sizeof(esp_schedule_t));
+    esp_schedule_t *schedule = (esp_schedule_t *)ESP_SCHEDULE_CALLOC(1, sizeof(esp_schedule_t));
     if (schedule == NULL) {
         ESP_SCHEDULE_LOGE(TAG, "Could not allocate handle");
         return NULL;

@@ -20,14 +20,6 @@ extern "C" {
 #define ESP_SCHEDULE_RET_INVALID_ARG ESP_ERR_INVALID_ARG
 #define ESP_SCHEDULE_RET_INVALID_STATE ESP_ERR_INVALID_STATE
 
-/** Use esp_log.h for logging. */
-#include <esp_log.h>
-#define ESP_SCHEDULE_LOGE(tag, fmt, ...) ESP_LOGE(tag, fmt, ##__VA_ARGS__)
-#define ESP_SCHEDULE_LOGW(tag, fmt, ...) ESP_LOGW(tag, fmt, ##__VA_ARGS__)
-#define ESP_SCHEDULE_LOGI(tag, fmt, ...) ESP_LOGI(tag, fmt, ##__VA_ARGS__)
-#define ESP_SCHEDULE_LOGD(tag, fmt, ...) ESP_LOGD(tag, fmt, ##__VA_ARGS__)
-#define ESP_SCHEDULE_LOGV(tag, fmt, ...) ESP_LOGV(tag, fmt, ##__VA_ARGS__)
-
 #include "esp_schedule_untyped.h"
 
 #ifdef __cplusplus
