@@ -100,7 +100,7 @@ ESP_SCHEDULE_RETURN_TYPE esp_schedule_nvs_remove_all(void)
         ESP_SCHEDULE_LOGE(TAG, "NVS open failed with error %d", err);
         return err;
     }
-    err = esp_schedule_nvs_erase_key(nvs_handle, NULL);
+    err = esp_schedule_nvs_erase_all(nvs_handle);
     if (err != ESP_SCHEDULE_RET_OK) {
         ESP_SCHEDULE_LOGE(TAG, "NVS erase all keys failed with error %d", err);
         esp_schedule_nvs_close(nvs_handle);
