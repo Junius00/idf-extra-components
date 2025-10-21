@@ -11,8 +11,10 @@
 
 typedef struct esp_schedule {
     char name[MAX_SCHEDULE_NAME_LEN + 1];
-    esp_schedule_trigger_t trigger;
+    /* List of triggers associated with this schedule. We deep-copy from config. */
+    esp_schedule_trigger_list_t triggers;
     uint32_t next_scheduled_time_diff;
+    time_t next_scheduled_time_utc;
     esp_schedule_timer_handle_t timer;
     esp_schedule_trigger_cb_t trigger_cb;
     esp_schedule_timestamp_cb_t timestamp_cb;
@@ -25,3 +27,32 @@ ESP_SCHEDULE_RETURN_TYPE esp_schedule_nvs_remove(esp_schedule_t *schedule);
 esp_schedule_handle_t *esp_schedule_nvs_get_all(uint8_t *schedule_count);
 bool esp_schedule_nvs_is_enabled(void);
 ESP_SCHEDULE_RETURN_TYPE esp_schedule_nvs_init(char *nvs_partition);
+
+/* Internal time calculation helpers (shared across implementation files) */
+bool esp_schedule_get_next_date_time(
+    time_t now,
+    uint16_t minutes_since_midnight,
+    uint8_t days_of_week_mask,
+    uint8_t day_of_month,
+    uint16_t months_of_year_mask,
+    uint16_t year,
+    const esp_schedule_validity_t *validity,
+    time_t *next_time
+);
+
+#if CONFIG_ESP_SCHEDULE_ENABLE_DAYLIGHT
+time_t esp_schedule_calc_solar_time_for_time_utc(
+    bool is_sunrise,
+    time_t time_utc,
+    double latitude,
+    double longitude,
+    int offset_minutes
+);
+
+time_t esp_schedule_get_next_valid_solar_time(
+    time_t now,
+    const esp_schedule_trigger_t *trigger,
+    const esp_schedule_validity_t *validity,
+    const char *schedule_name
+);
+#endif /* CONFIG_ESP_SCHEDULE_ENABLE_DAYLIGHT */

@@ -36,6 +36,7 @@ extern "C" {
 
 #include <stdint.h>
 #include <time.h>
+#include <stdbool.h>
 
 /** Schedule Handle */
 typedef void *esp_schedule_handle_t;
@@ -151,6 +152,12 @@ typedef struct esp_schedule_trigger {
     time_t next_scheduled_time_utc;
 } esp_schedule_trigger_t;
 
+/** List of triggers for a schedule */
+typedef struct esp_schedule_trigger_list {
+    esp_schedule_trigger_t *list;
+    uint8_t count;
+} esp_schedule_trigger_list_t;
+
 /** Schedule Validity
  * Start and end time within which the schedule will be applicable.
  */
@@ -166,7 +173,7 @@ typedef struct esp_schedule_config {
     /** Name of the schedule. This is like a primary key for the schedule. This is required. +1 for NULL termination. */
     char name[MAX_SCHEDULE_NAME_LEN + 1];
     /** Trigger details */
-    esp_schedule_trigger_t trigger;
+    esp_schedule_trigger_list_t triggers;
     /** Trigger callback */
     esp_schedule_trigger_cb_t trigger_cb;
     /** Timestamp callback */
