@@ -80,6 +80,14 @@ esp_schedule_nvs_error_t esp_schedule_nvs_commit(esp_schedule_nvs_handle_t handl
 esp_schedule_nvs_error_t esp_schedule_nvs_erase_key(esp_schedule_nvs_handle_t handle, const char *key);
 
 /**
+ * @brief Erase all keys from the NVS partition.
+ *
+ * @param[in] handle The handle to the NVS partition.
+ * @return ESP_SCHEDULE_NVS_OK on success, otherwise error code.
+ */
+esp_schedule_nvs_error_t esp_schedule_nvs_erase_all(esp_schedule_nvs_handle_t handle);
+
+/**
  * @brief Set a blob in the NVS partition.
  *
  * @param[in] handle The handle to the NVS partition.

@@ -54,6 +54,11 @@ esp_schedule_nvs_error_t esp_schedule_nvs_erase_key(esp_schedule_nvs_handle_t ha
     return to_esp_schedule_nvs_error(nvs_erase_key((nvs_handle_t) handle, key));
 }
 
+esp_schedule_nvs_error_t esp_schedule_nvs_erase_all(esp_schedule_nvs_handle_t handle)
+{
+    return to_esp_schedule_nvs_error(nvs_erase_all((nvs_handle_t) handle));
+}
+
 esp_schedule_nvs_error_t esp_schedule_nvs_set_blob(esp_schedule_nvs_handle_t handle, const char *key, const void *value, size_t value_len)
 {
     return to_esp_schedule_nvs_error(nvs_set_blob((nvs_handle_t) handle, key, value, value_len));
