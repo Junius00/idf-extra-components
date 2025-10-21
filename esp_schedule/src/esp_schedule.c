@@ -5,9 +5,9 @@
  */
 #include <string.h>
 #include <inttypes.h>
-#include <esp_log.h>
-#include <esp_rmaker_utils.h>
 #include <glue_time.h>
+#include <glue_log.h>
+#include <glue_mem.h>
 #include <esp_daylight.h>
 #include "esp_schedule_internal.h"
 
@@ -758,7 +758,7 @@ ESP_SCHEDULE_RETURN_TYPE esp_schedule_delete(esp_schedule_handle_t handle)
         esp_schedule_delete_timer(schedule);
     }
     esp_schedule_nvs_remove(schedule);
-    free(schedule);
+    ESP_SCHEDULE_FREE(schedule);
     return ESP_SCHEDULE_RET_OK;
 }
 
@@ -777,7 +777,7 @@ esp_schedule_handle_t esp_schedule_create(esp_schedule_config_t *schedule_config
         return NULL;
     }
 
-    esp_schedule_t *schedule = (esp_schedule_t *)MEM_CALLOC_EXTRAM(1, sizeof(esp_schedule_t));
+    esp_schedule_t *schedule = (esp_schedule_t *)ESP_SCHEDULE_CALLOC(1, sizeof(esp_schedule_t));
     if (schedule == NULL) {
         ESP_SCHEDULE_LOGE(TAG, "Could not allocate handle");
         return NULL;

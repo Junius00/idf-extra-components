@@ -17,6 +17,7 @@
 #include "esp_schedule_internal.h"
 
 #include "glue_nvs.h"
+#include "glue_log.h"
 
 static const char *TAG = "esp_schedule_nvs";
 

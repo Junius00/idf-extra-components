@@ -19,12 +19,6 @@
  *   - ESP_SCHEDULE_RET_INVALID_ARG  : Invalid argument.
  *   - ESP_SCHEDULE_RET_INVALID_STATE: Invalid state.
  *   - ESP_SCHEDULE_RET_NVS_NOT_FOUND: NVS not found.
- * - The following logging function macros MUST be defined:
- *   - ESP_SCHEDULE_LOGE(tag, fmt, ...) : Log an error message.
- *   - ESP_SCHEDULE_LOGW(tag, fmt, ...) : Log a warning message.
- *   - ESP_SCHEDULE_LOGI(tag, fmt, ...) : Log an info message.
- *   - ESP_SCHEDULE_LOGD(tag, fmt, ...) : Log a debug message.
- *   - ESP_SCHEDULE_LOGV(tag, fmt, ...) : Log a verbose message.
  */
 
 #ifndef __ESP_SCHEDULE_UNTYPED_H__
@@ -34,6 +28,7 @@
 extern "C" {
 #endif
 
+#include <stdbool.h>
 #include <stdint.h>
 #include <time.h>
 
