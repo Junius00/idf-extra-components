@@ -5,8 +5,33 @@
 #include "unity.h"
 #include "esp_schedule_internal.h"
 #include "esp_daylight.h"
+#include "nvs_flash.h"
 
 static const char *TAG = "test_app";
+
+// NVS initialization for tests
+static void init_nvs_for_tests(void)
+{
+    // Initialize NVS flash storage with specific partition
+    esp_err_t err = nvs_flash_init_partition("nvs");
+    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        // NVS partition was truncated or has new version - erase and reinitialize
+        ESP_ERROR_CHECK(nvs_flash_erase_partition("nvs"));
+        err = nvs_flash_init_partition("nvs");
+    }
+    ESP_ERROR_CHECK(err);
+
+    // Initialize NVS for schedules (use default partition)
+    ESP_SCHEDULE_RETURN_TYPE nvs_init_result = esp_schedule_nvs_init("nvs");
+    if (nvs_init_result != ESP_SCHEDULE_RET_OK) {
+        TEST_ASSERT_EQUAL_INT_MESSAGE(ESP_SCHEDULE_RET_OK, nvs_init_result, "NVS initialization should succeed");
+    }
+
+    // Check if NVS is enabled
+    TEST_ASSERT_TRUE_MESSAGE(esp_schedule_nvs_is_enabled(), "NVS should be enabled");
+
+    ESP_LOGI(TAG, "NVS initialized for tests");
+}
 
 static void print_time(const char *label, time_t t)
 {
@@ -291,6 +316,206 @@ static void test_solar_sequence_monotonic(void)
 }
 #endif
 
+// --- NVS Tests ---
+
+static void __match_trigger(esp_schedule_trigger_t *got, esp_schedule_trigger_t *want)
+{
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(got->type, want->type, "Trigger types should match");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(got->hours, want->hours, "Trigger hours should match");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(got->minutes, want->minutes, "Trigger minutes should match");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(got->day.repeat_days, want->day.repeat_days, "Trigger days should match");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(got->date.day, want->date.day, "Trigger date should match");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(got->date.repeat_months, want->date.repeat_months, "Trigger months should match");
+    TEST_ASSERT_EQUAL_DOUBLE_MESSAGE(got->solar.latitude, want->solar.latitude, "Trigger latitude should match");
+    TEST_ASSERT_EQUAL_DOUBLE_MESSAGE(got->solar.longitude, want->solar.longitude, "Trigger longitude should match");
+    TEST_ASSERT_EQUAL_INT32_MESSAGE(got->solar.offset_minutes, want->solar.offset_minutes, "Trigger offset minutes should match");
+}
+
+static void test_nvs_basic_operations(void)
+{
+    // Create a simple schedule config
+    esp_schedule_config_t config = {0};
+    strcpy(config.name, "test_schedule");
+    config.triggers.count = 1;
+    config.triggers.list = (esp_schedule_trigger_t*)malloc(sizeof(esp_schedule_trigger_t));
+    config.triggers.list[0].type = ESP_SCHEDULE_TYPE_DAYS_OF_WEEK;
+    config.triggers.list[0].hours = 8;
+    config.triggers.list[0].minutes = 0;
+    config.triggers.list[0].day.repeat_days = ESP_SCHEDULE_DAY_MONDAY;
+    config.validity.start_time = 0;
+    config.validity.end_time = 2147483647; // Max time_t
+
+    // Create schedule
+    esp_schedule_handle_t handle = esp_schedule_create(&config);
+    TEST_ASSERT_NOT_NULL_MESSAGE(handle, "Failed to create schedule");
+
+    // Retrieve all schedules from NVS
+    uint8_t count = 0;
+    esp_schedule_handle_t* handles = esp_schedule_nvs_get_all(&count);
+    ESP_LOGI(TAG, "Schedules in NVS: %d", count);
+    TEST_ASSERT_NOT_NULL_MESSAGE(handles, "Failed to get schedules from NVS");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(1, count, "Should have 1 schedule in NVS");
+
+    // Find our test schedule in the retrieved list
+    esp_schedule_handle_t retrieved_handle = NULL;
+    for (int i = 0; i < count; i++) {
+        esp_schedule_config_t retrieved_config = {0};
+        esp_schedule_get(handles[i], &retrieved_config);
+        if (strcmp(retrieved_config.name, config.name) == 0) {
+            retrieved_handle = handles[i];
+            break;
+        }
+    }
+    TEST_ASSERT_NOT_NULL_MESSAGE(retrieved_handle, "Test schedule not found in retrieved list");
+
+    // Verify retrieved schedule has same data
+    esp_schedule_config_t retrieved_config = {0};
+    esp_schedule_get(retrieved_handle, &retrieved_config);
+    TEST_ASSERT_EQUAL_STRING_MESSAGE(config.name, retrieved_config.name, "Schedule names should match");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(config.triggers.count, retrieved_config.triggers.count, "Trigger counts should match");
+    __match_trigger(&config.triggers.list[0], &retrieved_config.triggers.list[0]);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(config.validity.start_time, retrieved_config.validity.start_time, "Validity start time should match");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(config.validity.end_time, retrieved_config.validity.end_time, "Validity end time should match");
+
+    // Clean up
+    esp_schedule_delete(handle);
+    for (int i = 0; i < count; i++) {
+        esp_schedule_delete(handles[i]);
+    }
+    free(handles);
+    free(config.triggers.list);
+
+    // Verify removal - should be 0 schedules
+    handles = esp_schedule_nvs_get_all(&count);
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(0, count, "Should have 0 schedules after removal");
+    if (handles) free(handles);
+}
+
+static void test_nvs_multiple_schedules(void)
+{
+    // Create multiple schedules
+    esp_schedule_config_t configs[3] = {0};
+    const char* names[3] = {"schedule1", "schedule2", "schedule3"};
+
+    for (int i = 0; i < 3; i++) {
+        strcpy(configs[i].name, names[i]);
+        configs[i].triggers.count = 1;
+        configs[i].triggers.list = (esp_schedule_trigger_t*)malloc(sizeof(esp_schedule_trigger_t));
+        configs[i].triggers.list[0].type = ESP_SCHEDULE_TYPE_DAYS_OF_WEEK;
+        configs[i].triggers.list[0].hours = 8 + i;
+        configs[i].triggers.list[0].minutes = i * 15;
+        configs[i].triggers.list[0].day.repeat_days = ESP_SCHEDULE_DAY_MONDAY;
+        configs[i].validity.start_time = 0;
+        configs[i].validity.end_time = 2147483647;
+
+        esp_schedule_handle_t handle = esp_schedule_create(&configs[i]);
+        TEST_ASSERT_NOT_NULL_MESSAGE(handle, "Failed to create schedule");
+    }
+
+    // Get all schedules
+    uint8_t retrieved_count = 0;
+    esp_schedule_handle_t* handles = esp_schedule_nvs_get_all(&retrieved_count);
+    TEST_ASSERT_NOT_NULL_MESSAGE(handles, "Failed to get all schedules");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(3, retrieved_count, "Should retrieve 3 schedules");
+
+    // Find and verify each expected schedule by name
+    bool found_schedules[3] = {false, false, false};
+    for (int i = 0; i < retrieved_count; i++) {
+        esp_schedule_config_t retrieved_config = {0};
+        esp_schedule_get(handles[i], &retrieved_config);
+
+        // Check which schedule this is
+        for (int j = 0; j < 3; j++) {
+            if (strcmp(retrieved_config.name, names[j]) == 0) {
+                TEST_ASSERT_FALSE_MESSAGE(found_schedules[j], "Duplicate schedule found");
+                found_schedules[j] = true;
+                __match_trigger(&configs[j].triggers.list[0], &retrieved_config.triggers.list[0]);
+                free(configs[j].triggers.list);
+                break;
+            }
+        }
+        esp_schedule_delete(handles[i]);
+    }
+    free(handles);
+
+    // Verify all expected schedules were found
+    for (int i = 0; i < 3; i++) {
+        TEST_ASSERT_TRUE_MESSAGE(found_schedules[i], "Expected schedule not found");
+    }
+
+    // Verify all removed
+    handles = esp_schedule_nvs_get_all(&retrieved_count);
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(0, retrieved_count, "Should have 0 schedules after remove_all");
+    if (handles) free(handles);
+}
+
+static void test_nvs_schedule_with_multiple_triggers(void)
+{
+    // Create schedule with multiple triggers
+    esp_schedule_config_t config = {0};
+    strcpy(config.name, "multi_trigger");
+    config.triggers.count = 3;
+    config.triggers.list = (esp_schedule_trigger_t*)malloc(3 * sizeof(esp_schedule_trigger_t));
+
+    // First trigger: Monday 8:00
+    config.triggers.list[0].type = ESP_SCHEDULE_TYPE_DAYS_OF_WEEK;
+    config.triggers.list[0].hours = 8;
+    config.triggers.list[0].minutes = 0;
+    config.triggers.list[0].day.repeat_days = ESP_SCHEDULE_DAY_MONDAY;
+
+    // Second trigger: Wednesday 14:30
+    config.triggers.list[1].type = ESP_SCHEDULE_TYPE_DAYS_OF_WEEK;
+    config.triggers.list[1].hours = 14;
+    config.triggers.list[1].minutes = 30;
+    config.triggers.list[1].day.repeat_days = ESP_SCHEDULE_DAY_WEDNESDAY;
+
+    // Third trigger: Friday 18:45
+    config.triggers.list[2].type = ESP_SCHEDULE_TYPE_DAYS_OF_WEEK;
+    config.triggers.list[2].hours = 18;
+    config.triggers.list[2].minutes = 45;
+    config.triggers.list[2].day.repeat_days = ESP_SCHEDULE_DAY_FRIDAY;
+
+    config.validity.start_time = 0;
+    config.validity.end_time = 2147483647;
+
+    // Create and store schedule
+    esp_schedule_handle_t handle = esp_schedule_create(&config);
+    TEST_ASSERT_NOT_NULL_MESSAGE(handle, "Failed to create schedule");
+
+    // Retrieve all schedules and find our test schedule
+    uint8_t count = 0;
+    esp_schedule_handle_t* handles = esp_schedule_nvs_get_all(&count);
+    TEST_ASSERT_NOT_NULL_MESSAGE(handles, "Failed to get schedules from NVS");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(1, count, "Should have 1 schedule in NVS");
+
+    esp_schedule_handle_t retrieved_handle = NULL;
+    for (int i = 0; i < count; i++) {
+        esp_schedule_config_t retrieved_config = {0};
+        esp_schedule_get(handles[i], &retrieved_config);
+        if (strcmp(retrieved_config.name, config.name) == 0) {
+            retrieved_handle = handles[i];
+        } else {
+            esp_schedule_delete(handles[i]); // Clean up non-matching schedules immediately
+        }
+    }
+
+    TEST_ASSERT_NOT_NULL_MESSAGE(retrieved_handle, "Test schedule not found in retrieved list");
+
+    esp_schedule_config_t retrieved_config = {0};
+    esp_schedule_get(retrieved_handle, &retrieved_config);
+
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(3, retrieved_config.triggers.count, "Should have 3 triggers");
+    for (int i = 0; i < 3; i++) {
+        __match_trigger(&config.triggers.list[i], &retrieved_config.triggers.list[i]);
+    }
+
+    // Clean up
+    esp_schedule_delete(handle);
+    esp_schedule_delete(retrieved_handle);
+    free(handles);
+    free(config.triggers.list);
+}
+
 void app_main(void)
 {
     UNITY_BEGIN();
@@ -303,6 +528,31 @@ void app_main(void)
     RUN_TEST(test_sequence_dow_mon_wed);
     RUN_TEST(test_sequence_date_months_mask);
     RUN_TEST(test_sequence_validity_cutoff);
+
+    // NVS Tests
+    // Initialize NVS once for all tests
+    init_nvs_for_tests();
+
+    // Clear all existing schedules before starting NVS tests
+    if (esp_schedule_nvs_is_enabled()) {
+        ESP_LOGI(TAG, "Clearing existing schedules before NVS tests...");
+        esp_schedule_nvs_remove_all();
+
+        // Verify cleanup worked
+        uint8_t remaining_count = 0;
+        esp_schedule_handle_t* remaining_handles = esp_schedule_nvs_get_all(&remaining_count);
+        if (remaining_handles) {
+            for (int i = 0; i < remaining_count; i++) {
+                esp_schedule_delete(remaining_handles[i]);
+            }
+            free(remaining_handles);
+        }
+        ESP_LOGI(TAG, "Existing schedules cleared - found %d remaining", remaining_count);
+    }
+    RUN_TEST(test_nvs_basic_operations);
+    RUN_TEST(test_nvs_multiple_schedules);
+    RUN_TEST(test_nvs_schedule_with_multiple_triggers);
+
 #if CONFIG_ESP_SCHEDULE_ENABLE_DAYLIGHT
     RUN_TEST(test_solar_with_dow);
     RUN_TEST(test_solar_with_date_mask);

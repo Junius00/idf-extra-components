@@ -15,6 +15,7 @@
 #include <string.h>
 #include <time.h>
 #include "esp_schedule_internal.h"
+#include "glue_mem.h"
 
 #include "glue_nvs.h"
 #include "glue_log.h"
@@ -56,7 +57,34 @@ ESP_SCHEDULE_RETURN_TYPE esp_schedule_nvs_add(esp_schedule_t *schedule)
         ESP_SCHEDULE_LOGI(TAG, "Updating the existing schedule %s", schedule->name);
     }
 
-    err = esp_schedule_nvs_set_blob(nvs_handle, schedule->name, schedule, sizeof(esp_schedule_t));
+    /* Calculate total blob size: schedule + trigger list */
+    size_t total_size = sizeof(esp_schedule_t);
+    size_t trigger_list_size = 0;
+    if (schedule->triggers.count > 0 && schedule->triggers.list != NULL) {
+        trigger_list_size = schedule->triggers.count * sizeof(esp_schedule_trigger_t);
+        total_size += trigger_list_size;
+    }
+
+    /* Allocate buffer for combined data */
+    uint8_t *blob_buffer = (uint8_t *)ESP_SCHEDULE_MALLOC(total_size);
+    if (blob_buffer == NULL) {
+        ESP_SCHEDULE_LOGE(TAG, "Could not allocate blob buffer");
+        esp_schedule_nvs_close(nvs_handle);
+        return ESP_SCHEDULE_RET_NO_MEM;
+    }
+
+    /* Copy schedule structure to beginning of buffer */
+    memcpy(blob_buffer, schedule, sizeof(esp_schedule_t));
+
+    /* Copy trigger list to end of buffer if it exists */
+    if (trigger_list_size > 0) {
+        memcpy(blob_buffer + sizeof(esp_schedule_t), schedule->triggers.list, trigger_list_size);
+    }
+
+    /* Store combined blob */
+    err = esp_schedule_nvs_set_blob(nvs_handle, schedule->name, blob_buffer, total_size);
+    ESP_SCHEDULE_FREE(blob_buffer);
+
     if (err != ESP_SCHEDULE_RET_OK) {
         ESP_SCHEDULE_LOGE(TAG, "NVS set failed with error %d", err);
         esp_schedule_nvs_close(nvs_handle);
@@ -124,6 +152,8 @@ ESP_SCHEDULE_RETURN_TYPE esp_schedule_nvs_remove(esp_schedule_t *schedule)
         ESP_SCHEDULE_LOGE(TAG, "NVS open failed with error %d", err);
         return err;
     }
+
+    /* Remove schedule blob (includes trigger data) */
     err = esp_schedule_nvs_erase_key(nvs_handle, schedule->name);
     if (err != ESP_SCHEDULE_NVS_OK) {
         ESP_SCHEDULE_LOGE(TAG, "NVS erase key failed with error %d", err);
@@ -187,27 +217,77 @@ static esp_schedule_handle_t esp_schedule_nvs_get(const char *nvs_key)
         ESP_SCHEDULE_LOGE(TAG, "NVS open failed with error %d", err);
         return NULL;
     }
+
+    /* Get blob size */
     err = esp_schedule_nvs_get_blob(nvs_handle, nvs_key, NULL, &buf_size);
     if (err != ESP_SCHEDULE_NVS_OK) {
         ESP_SCHEDULE_LOGE(TAG, "NVS get failed with error %d", err);
         esp_schedule_nvs_close(nvs_handle);
         return NULL;
     }
-    esp_schedule_t *schedule = (esp_schedule_t *)malloc(buf_size);
-    if (schedule == NULL) {
-        ESP_SCHEDULE_LOGE(TAG, "Could not allocate handle");
+
+    /* Allocate buffer for entire blob */
+    uint8_t *blob_buffer = (uint8_t *)ESP_SCHEDULE_MALLOC(buf_size);
+    if (blob_buffer == NULL) {
+        ESP_SCHEDULE_LOGE(TAG, "Could not allocate blob buffer");
         esp_schedule_nvs_close(nvs_handle);
         return NULL;
     }
-    err = esp_schedule_nvs_get_blob(nvs_handle, nvs_key, schedule, &buf_size);
+
+    /* Read entire blob */
+    err = esp_schedule_nvs_get_blob(nvs_handle, nvs_key, blob_buffer, &buf_size);
     if (err != ESP_SCHEDULE_NVS_OK) {
         ESP_SCHEDULE_LOGE(TAG, "NVS get failed with error %d", err);
         esp_schedule_nvs_close(nvs_handle);
-        free(schedule);
+        ESP_SCHEDULE_FREE(blob_buffer);
         return NULL;
     }
+
+    /* Allocate schedule structure */
+    esp_schedule_t *schedule = (esp_schedule_t *)ESP_SCHEDULE_MALLOC(sizeof(esp_schedule_t));
+    if (schedule == NULL) {
+        ESP_SCHEDULE_LOGE(TAG, "Could not allocate schedule");
+        esp_schedule_nvs_close(nvs_handle);
+        ESP_SCHEDULE_FREE(blob_buffer);
+        return NULL;
+    }
+
+    /* Copy schedule structure from beginning of blob */
+    memcpy(schedule, blob_buffer, sizeof(esp_schedule_t));
+
+    /* Check if there are triggers to load */
+    size_t schedule_size = sizeof(esp_schedule_t);
+    size_t trigger_list_size = buf_size - schedule_size;
+
+    if (trigger_list_size > 0 && schedule->triggers.count > 0) {
+        /* Allocate and load trigger list */
+        esp_schedule_trigger_t *triggers = (esp_schedule_trigger_t *)ESP_SCHEDULE_MALLOC(trigger_list_size);
+        if (triggers == NULL) {
+            ESP_SCHEDULE_LOGE(TAG, "Could not allocate trigger list");
+            esp_schedule_nvs_close(nvs_handle);
+            ESP_SCHEDULE_FREE(schedule);
+            ESP_SCHEDULE_FREE(blob_buffer);
+            return NULL;
+        }
+
+        /* Copy trigger list from end of blob */
+        memcpy(triggers, blob_buffer + schedule_size, trigger_list_size);
+
+        /* Update schedule with loaded triggers */
+        schedule->triggers.list = triggers;
+        ESP_SCHEDULE_LOGI(TAG, "Loaded %d triggers for schedule %s", schedule->triggers.count, schedule->name);
+    } else {
+        /* No trigger list - set to NULL and count to 0 */
+        uint8_t original_count = schedule->triggers.count;
+        schedule->triggers.list = 0x0;
+        schedule->triggers.count = 0;
+        if (original_count > 0) {
+            ESP_SCHEDULE_LOGW(TAG, "Schedule %s has trigger count but no trigger data in blob", nvs_key);
+        }
+    }
+
     esp_schedule_nvs_close(nvs_handle);
-    ESP_SCHEDULE_LOGI(TAG, "Schedule %s found in NVS", schedule->name);
+    ESP_SCHEDULE_FREE(blob_buffer);
     return (esp_schedule_handle_t) schedule;
 }
 
