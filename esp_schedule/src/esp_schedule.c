@@ -537,6 +537,9 @@ static ESP_SCHEDULE_RETURN_TYPE esp_schedule_set(esp_schedule_t *schedule, esp_s
     }
     if (schedule_config->triggers.count > 0 && schedule_config->triggers.list != NULL) {
         size_t bytes = (size_t)schedule_config->triggers.count * sizeof(esp_schedule_trigger_t);
+        if (schedule->triggers.list) {
+            ESP_SCHEDULE_FREE(schedule->triggers.list);
+        }
         esp_schedule_trigger_t *copy = (esp_schedule_trigger_t *)ESP_SCHEDULE_CALLOC(1, bytes);
         if (copy == NULL) {
             return ESP_SCHEDULE_RET_NO_MEM;
@@ -664,7 +667,7 @@ esp_schedule_handle_t *esp_schedule_init(bool enable_nvs, char *nvs_partition, u
     ESP_SCHEDULE_LOGI(TAG, "Schedules found in NVS: %"PRIu8, *schedule_count);
     /* Start/Delete the schedules */
     esp_schedule_t *schedule = NULL;
-    for (size_t handle_count = 0; handle_count < *schedule_count; handle_count++) {
+    for (int handle_count = *schedule_count - 1; handle_count >= 0; handle_count--) {
         schedule = (esp_schedule_t *)handle_list[handle_count];
         schedule->trigger_cb = NULL;
         schedule->timer = NULL;
@@ -674,9 +677,11 @@ esp_schedule_handle_t *esp_schedule_init(bool enable_nvs, char *nvs_partition, u
             ESP_SCHEDULE_LOGI(TAG, "Schedule %s does not repeat and has already expired. Deleting it.", schedule->name);
             esp_schedule_delete((esp_schedule_handle_t)schedule);
             /* Removing the schedule from the list */
-            handle_list[handle_count] = handle_list[*schedule_count - 1];
+            for (int i = handle_count; i < *schedule_count - 1; i++) {
+                handle_list[i] = handle_list[i + 1];
+            }
+            handle_list[*schedule_count - 1] = NULL;
             (*schedule_count)--;
-            handle_count--;
             continue;
         }
         esp_schedule_start_timer(schedule);
