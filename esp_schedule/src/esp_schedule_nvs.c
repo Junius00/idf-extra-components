@@ -28,6 +28,21 @@ static const char *TAG = "esp_schedule_nvs";
 static char *esp_schedule_nvs_partition = NULL;
 static bool nvs_enabled = false;
 
+static ESP_SCHEDULE_RETURN_TYPE to_esp_schedule_return_type(esp_schedule_nvs_error_t err)
+{
+    switch (err)
+    {
+        case ESP_SCHEDULE_NVS_OK:
+            return ESP_SCHEDULE_RET_OK;
+        case ESP_SCHEDULE_NVS_NOT_FOUND:
+            return ESP_SCHEDULE_RET_INVALID_STATE;
+        case ESP_SCHEDULE_NVS_NO_MEM:
+            return ESP_SCHEDULE_RET_NO_MEM;
+        default:
+            return ESP_SCHEDULE_RET_FAIL;
+    }
+}
+
 ESP_SCHEDULE_RETURN_TYPE esp_schedule_nvs_add(esp_schedule_t *schedule)
 {
     if (!nvs_enabled) {
@@ -38,7 +53,7 @@ ESP_SCHEDULE_RETURN_TYPE esp_schedule_nvs_add(esp_schedule_t *schedule)
     esp_schedule_nvs_error_t err = esp_schedule_nvs_open_from_partition(esp_schedule_nvs_partition, ESP_SCHEDULE_NVS_NAMESPACE, ESP_SCHEDULE_NVS_OPEN_READWRITE, &nvs_handle);
     if (err != ESP_SCHEDULE_NVS_OK) {
         ESP_SCHEDULE_LOGE(TAG, "NVS open failed with error %d", err);
-        return err;
+        return to_esp_schedule_return_type(err);
     }
 
     /* Check if this is new schedule or editing an existing schedule */
@@ -49,9 +64,9 @@ ESP_SCHEDULE_RETURN_TYPE esp_schedule_nvs_add(esp_schedule_t *schedule)
         if (err == ESP_SCHEDULE_NVS_NOT_FOUND) {
             editing_schedule = false;
         } else {
-            ESP_SCHEDULE_LOGE(TAG, "NVS get failed with error %d", err);
+            ESP_SCHEDULE_LOGE(TAG, "NVS get existing schedule failed while adding schedule %s with error %d", schedule->name, err);
             esp_schedule_nvs_close(nvs_handle);
-            return err;
+            return to_esp_schedule_return_type(err);
         }
     } else {
         ESP_SCHEDULE_LOGI(TAG, "Updating the existing schedule %s", schedule->name);
@@ -85,10 +100,10 @@ ESP_SCHEDULE_RETURN_TYPE esp_schedule_nvs_add(esp_schedule_t *schedule)
     err = esp_schedule_nvs_set_blob(nvs_handle, schedule->name, blob_buffer, total_size);
     ESP_SCHEDULE_FREE(blob_buffer);
 
-    if (err != ESP_SCHEDULE_RET_OK) {
+    if (err != ESP_SCHEDULE_NVS_OK) {
         ESP_SCHEDULE_LOGE(TAG, "NVS set failed with error %d", err);
         esp_schedule_nvs_close(nvs_handle);
-        return err;
+        return to_esp_schedule_return_type(err);
     }
     if (editing_schedule == false) {
         uint8_t schedule_count;
@@ -97,9 +112,9 @@ ESP_SCHEDULE_RETURN_TYPE esp_schedule_nvs_add(esp_schedule_t *schedule)
             if (err == ESP_SCHEDULE_NVS_NOT_FOUND) {
                 schedule_count = 0;
             } else {
-                ESP_SCHEDULE_LOGE(TAG, "NVS get failed with error %d", err);
+                ESP_SCHEDULE_LOGE(TAG, "NVS get existing schedule count failed while adding schedule %s with error %d", schedule->name, err);
                 esp_schedule_nvs_close(nvs_handle);
-                return err;
+                return to_esp_schedule_return_type(err);
             }
         }
         schedule_count++;
@@ -107,7 +122,7 @@ ESP_SCHEDULE_RETURN_TYPE esp_schedule_nvs_add(esp_schedule_t *schedule)
         if (err != ESP_SCHEDULE_NVS_OK) {
             ESP_SCHEDULE_LOGE(TAG, "NVS set failed for schedule count with error %d", err);
             esp_schedule_nvs_close(nvs_handle);
-            return err;
+            return to_esp_schedule_return_type(err);
         }
     }
     esp_schedule_nvs_commit(nvs_handle);
@@ -123,16 +138,16 @@ ESP_SCHEDULE_RETURN_TYPE esp_schedule_nvs_remove_all(void)
         return ESP_SCHEDULE_RET_INVALID_STATE;
     }
     esp_schedule_nvs_handle_t nvs_handle;
-    ESP_SCHEDULE_RETURN_TYPE err = esp_schedule_nvs_open_from_partition(esp_schedule_nvs_partition, ESP_SCHEDULE_NVS_NAMESPACE, ESP_SCHEDULE_NVS_OPEN_READWRITE, &nvs_handle);
+    esp_schedule_nvs_error_t err = esp_schedule_nvs_open_from_partition(esp_schedule_nvs_partition, ESP_SCHEDULE_NVS_NAMESPACE, ESP_SCHEDULE_NVS_OPEN_READWRITE, &nvs_handle);
     if (err != ESP_SCHEDULE_NVS_OK) {
         ESP_SCHEDULE_LOGE(TAG, "NVS open failed with error %d", err);
-        return err;
+        return to_esp_schedule_return_type(err);
     }
     err = esp_schedule_nvs_erase_all(nvs_handle);
-    if (err != ESP_SCHEDULE_RET_OK) {
+    if (err != ESP_SCHEDULE_NVS_OK) {
         ESP_SCHEDULE_LOGE(TAG, "NVS erase all keys failed with error %d", err);
         esp_schedule_nvs_close(nvs_handle);
-        return err;
+        return to_esp_schedule_return_type(err);
     }
     esp_schedule_nvs_commit(nvs_handle);
     esp_schedule_nvs_close(nvs_handle);
@@ -150,7 +165,7 @@ ESP_SCHEDULE_RETURN_TYPE esp_schedule_nvs_remove(esp_schedule_t *schedule)
     esp_schedule_nvs_error_t err = esp_schedule_nvs_open_from_partition(esp_schedule_nvs_partition, ESP_SCHEDULE_NVS_NAMESPACE, ESP_SCHEDULE_NVS_OPEN_READWRITE, &nvs_handle);
     if (err != ESP_SCHEDULE_NVS_OK) {
         ESP_SCHEDULE_LOGE(TAG, "NVS open failed with error %d", err);
-        return err;
+        return to_esp_schedule_return_type(err);
     }
 
     /* Remove schedule blob (includes trigger data) */
@@ -158,21 +173,21 @@ ESP_SCHEDULE_RETURN_TYPE esp_schedule_nvs_remove(esp_schedule_t *schedule)
     if (err != ESP_SCHEDULE_NVS_OK) {
         ESP_SCHEDULE_LOGE(TAG, "NVS erase key failed with error %d", err);
         esp_schedule_nvs_close(nvs_handle);
-        return err;
+        return to_esp_schedule_return_type(err);
     }
     uint8_t schedule_count;
     err = esp_schedule_nvs_get_u8(nvs_handle, ESP_SCHEDULE_COUNT_KEY, &schedule_count);
     if (err != ESP_SCHEDULE_NVS_OK) {
         ESP_SCHEDULE_LOGE(TAG, "NVS get failed for schedule count with error %d", err);
         esp_schedule_nvs_close(nvs_handle);
-        return err;
+        return to_esp_schedule_return_type(err);
     }
     schedule_count--;
     err = esp_schedule_nvs_set_u8(nvs_handle, ESP_SCHEDULE_COUNT_KEY, schedule_count);
     if (err != ESP_SCHEDULE_NVS_OK) {
         ESP_SCHEDULE_LOGE(TAG, "NVS set failed for schedule count with error %d", err);
         esp_schedule_nvs_close(nvs_handle);
-        return err;
+        return to_esp_schedule_return_type(err);
     }
     esp_schedule_nvs_commit(nvs_handle);
     esp_schedule_nvs_close(nvs_handle);
