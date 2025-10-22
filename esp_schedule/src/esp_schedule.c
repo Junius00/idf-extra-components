@@ -344,7 +344,7 @@ static uint32_t esp_schedule_get_next_schedule_time_diff_multi(esp_schedule_t *s
     bool best_set = false;
     time_t best_utc = 0;
     time_t now = 0;
-    time(&now);
+    esp_schedule_get_time(&now);
 
     for (uint8_t i = 0; i < schedule->triggers.count; i++) {
         esp_schedule_trigger_t *tr = &schedule->triggers.list[i];
