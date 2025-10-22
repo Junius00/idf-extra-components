@@ -275,6 +275,18 @@ ESP_SCHEDULE_RETURN_TYPE esp_schedule_enable(esp_schedule_handle_t handle);
  */
 ESP_SCHEDULE_RETURN_TYPE esp_schedule_disable(esp_schedule_handle_t handle);
 
+/** Reset Timestamps
+ *
+ * Trigger next times are normally cached in the trigger struct and used if valid.
+ * This API can be used to reset the timestamps of all triggers of an existing schedule that are not RELATIVE.
+ * This is useful when the timezone changes and the timestamps of the triggers need to be recalculated.
+ *
+ * @param[in] handle Schedule handle for the schedule to be reset.
+ *
+ * @return ESP_SCHEDULE_RET_OK on success, otherwise error code.
+ */
+esp_schedule_return_type_t esp_schedule_reset_trigger_timestamps(esp_schedule_handle_t handle);
+
 /** Get Schedule
  *
  * This API can be used to get details of an existing schedule.
@@ -287,6 +299,31 @@ ESP_SCHEDULE_RETURN_TYPE esp_schedule_disable(esp_schedule_handle_t handle);
  * @return error in case of failure.
  */
 ESP_SCHEDULE_RETURN_TYPE esp_schedule_get(esp_schedule_handle_t handle, esp_schedule_config_t *schedule_config);
+
+/** Set Trigger Callback
+ *
+ * This API can be used to set the trigger callback for an existing schedule. Useful when the schedule is loaded from NVS.
+ *
+ * @param[in] handle Schedule handle.
+ * @param[in] trigger_cb Trigger callback.
+ *
+ * @return ESP_SCHEDULE_RET_OK on success.
+ * @return error in case of failure.
+ */
+ESP_SCHEDULE_RETURN_TYPE esp_schedule_set_trigger_callback(esp_schedule_handle_t handle, esp_schedule_trigger_cb_t trigger_cb);
+
+/** Set Timestamp Callback
+ *
+ * This API can be used to set the timestamp callback for an existing schedule. Useful when the schedule is loaded from NVS.
+ *
+ * @param[in] handle Schedule handle.
+ * @param[in] timestamp_cb Timestamp callback.
+ *
+ * @return ESP_SCHEDULE_RET_OK on success.
+ * @return error in case of failure.
+ */
+ESP_SCHEDULE_RETURN_TYPE esp_schedule_set_timestamp_callback(esp_schedule_handle_t handle, esp_schedule_timestamp_cb_t timestamp_cb);
+
 
 #ifdef __cplusplus
 }

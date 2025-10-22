@@ -527,6 +527,22 @@ ESP_SCHEDULE_RETURN_TYPE esp_schedule_disable(esp_schedule_handle_t handle)
     return ESP_SCHEDULE_RET_OK;
 }
 
+ESP_SCHEDULE_RETURN_TYPE esp_schedule_reset_trigger_timestamps(esp_schedule_handle_t handle)
+{
+    if (handle == NULL) {
+        return ESP_SCHEDULE_RET_INVALID_ARG;
+    }
+    esp_schedule_t *schedule = (esp_schedule_t *)handle;
+    for (uint8_t i = 0; i < schedule->triggers.count; i++) {
+        esp_schedule_trigger_t *tr = &schedule->triggers.list[i];
+        if (tr->type != ESP_SCHEDULE_TYPE_RELATIVE) {
+            /* Reset the next scheduled time UTC to 0 so that it will be recalculated */
+            tr->next_scheduled_time_utc = 0;
+        }
+    }
+    return ESP_SCHEDULE_RET_OK;
+}
+
 static ESP_SCHEDULE_RETURN_TYPE esp_schedule_set(esp_schedule_t *schedule, esp_schedule_config_t *schedule_config)
 {
     /* Deep copy trigger list from config, freeing previous if any. */
@@ -547,6 +563,12 @@ static ESP_SCHEDULE_RETURN_TYPE esp_schedule_set(esp_schedule_t *schedule, esp_s
         memcpy(copy, schedule_config->triggers.list, bytes);
         schedule->triggers.list = copy;
         schedule->triggers.count = schedule_config->triggers.count;
+
+        /* Calculate trigger timestamps once */
+        for (uint8_t i = 0; i < schedule->triggers.count; i++) {
+            esp_schedule_trigger_t *tr = &schedule->triggers.list[i];
+            esp_schedule_set_next_scheduled_time_utc(schedule->name, tr, &schedule_config->validity);
+        }
     }
 
     /* Reset effective timestamp; will be chosen during start */
@@ -688,4 +710,24 @@ esp_schedule_handle_t *esp_schedule_init(bool enable_nvs, char *nvs_partition, u
     }
     init_done = true;
     return handle_list;
+}
+
+ESP_SCHEDULE_RETURN_TYPE esp_schedule_set_trigger_callback(esp_schedule_handle_t handle, esp_schedule_trigger_cb_t trigger_cb)
+{
+    if (handle == NULL) {
+        return ESP_SCHEDULE_RET_INVALID_ARG;
+    }
+    esp_schedule_t *schedule = (esp_schedule_t *)handle;
+    schedule->trigger_cb = trigger_cb;
+    return ESP_SCHEDULE_RET_OK;
+}
+
+ESP_SCHEDULE_RETURN_TYPE esp_schedule_set_timestamp_callback(esp_schedule_handle_t handle, esp_schedule_timestamp_cb_t timestamp_cb)
+{
+    if (handle == NULL) {
+        return ESP_SCHEDULE_RET_INVALID_ARG;
+    }
+    esp_schedule_t *schedule = (esp_schedule_t *)handle;
+    schedule->timestamp_cb = timestamp_cb;
+    return ESP_SCHEDULE_RET_OK;
 }
