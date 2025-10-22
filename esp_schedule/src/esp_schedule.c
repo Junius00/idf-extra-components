@@ -667,7 +667,7 @@ esp_schedule_handle_t esp_schedule_create(esp_schedule_config_t *schedule_config
     return (esp_schedule_handle_t)schedule;
 }
 
-esp_schedule_handle_t *esp_schedule_init(bool enable_nvs, char *nvs_partition, uint8_t *schedule_count)
+esp_schedule_handle_t *esp_schedule_init(bool enable_nvs, char *nvs_partition, uint8_t *schedule_count, esp_schedule_priv_data_callbacks_t *priv_data_callbacks)
 {
     esp_schedule_timesync_init();
 
@@ -675,8 +675,15 @@ esp_schedule_handle_t *esp_schedule_init(bool enable_nvs, char *nvs_partition, u
         return NULL;
     }
 
+    if (priv_data_callbacks != NULL) {
+        if (priv_data_callbacks->on_save == NULL || priv_data_callbacks->on_load == NULL) {
+            ESP_SCHEDULE_LOGE(TAG, "Private data callbacks are invalid. Please provide both on_save and on_load callbacks.");
+            return NULL;
+        }
+    }
+
     /* Below this is initialising schedules from NVS */
-    esp_schedule_nvs_init(nvs_partition);
+    esp_schedule_nvs_init(nvs_partition, priv_data_callbacks);
 
     /* Get handle list from NVS */
     esp_schedule_handle_t *handle_list = NULL;

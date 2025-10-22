@@ -27,6 +27,10 @@ static const char *TAG = "esp_schedule_nvs";
 
 static char *esp_schedule_nvs_partition = NULL;
 static bool nvs_enabled = false;
+static esp_schedule_priv_data_callbacks_t nvs_priv_data_callbacks = {
+    .on_save = NULL,
+    .on_load = NULL,
+};
 
 static ESP_SCHEDULE_RETURN_TYPE to_esp_schedule_return_type(esp_schedule_nvs_error_t err)
 {
@@ -75,9 +79,16 @@ ESP_SCHEDULE_RETURN_TYPE esp_schedule_nvs_add(esp_schedule_t *schedule)
     /* Calculate total blob size: schedule + trigger list */
     size_t total_size = sizeof(esp_schedule_t);
     size_t trigger_list_size = 0;
+    size_t private_data_size = 0;
     if (schedule->triggers.count > 0 && schedule->triggers.list != NULL) {
         trigger_list_size = schedule->triggers.count * sizeof(esp_schedule_trigger_t);
         total_size += trigger_list_size;
+    }
+
+    /* Add private data size to total size if saving private data */
+    if (nvs_priv_data_callbacks.on_save != NULL) {
+        nvs_priv_data_callbacks.on_save(schedule->priv_data, NULL, &private_data_size);
+        total_size += private_data_size;
     }
 
     /* Allocate buffer for combined data */
@@ -94,6 +105,16 @@ ESP_SCHEDULE_RETURN_TYPE esp_schedule_nvs_add(esp_schedule_t *schedule)
     /* Copy trigger list to end of buffer if it exists */
     if (trigger_list_size > 0) {
         memcpy(blob_buffer + sizeof(esp_schedule_t), schedule->triggers.list, trigger_list_size);
+    }
+
+    /* Add private data to end of buffer if saving private data */
+    if (nvs_priv_data_callbacks.on_save != NULL) {
+        void *data = NULL;
+        nvs_priv_data_callbacks.on_save(schedule->priv_data, &data, &private_data_size);
+        if (data != NULL) {
+            memcpy(blob_buffer + total_size - private_data_size, data, private_data_size);
+            ESP_SCHEDULE_FREE(data);
+        }
     }
 
     /* Store combined blob */
@@ -272,9 +293,9 @@ static esp_schedule_handle_t esp_schedule_nvs_get(const char *nvs_key)
 
     /* Check if there are triggers to load */
     size_t schedule_size = sizeof(esp_schedule_t);
-    size_t trigger_list_size = buf_size - schedule_size;
+    size_t trigger_list_size = schedule->triggers.count * sizeof(esp_schedule_trigger_t);
 
-    if (trigger_list_size > 0 && schedule->triggers.count > 0) {
+    if (trigger_list_size > 0) {
         /* Allocate and load trigger list */
         esp_schedule_trigger_t *triggers = (esp_schedule_trigger_t *)ESP_SCHEDULE_MALLOC(trigger_list_size);
         if (triggers == NULL) {
@@ -299,6 +320,17 @@ static esp_schedule_handle_t esp_schedule_nvs_get(const char *nvs_key)
         if (original_count > 0) {
             ESP_SCHEDULE_LOGW(TAG, "Schedule %s has trigger count but no trigger data in blob", nvs_key);
         }
+    }
+
+    /* Load private data if saving private data */
+    size_t data_len = buf_size - schedule_size - trigger_list_size;
+    if (data_len > 0 && nvs_priv_data_callbacks.on_load != NULL) {
+        void *data = (void *) blob_buffer + schedule_size + trigger_list_size;
+        nvs_priv_data_callbacks.on_load(data, data_len, &schedule->priv_data);
+    }
+    else {
+        /* No private data to load */
+        schedule->priv_data = NULL;
     }
 
     esp_schedule_nvs_close(nvs_handle);
@@ -358,7 +390,7 @@ bool esp_schedule_nvs_is_enabled(void)
     return nvs_enabled;
 }
 
-ESP_SCHEDULE_RETURN_TYPE esp_schedule_nvs_init(char *nvs_partition)
+ESP_SCHEDULE_RETURN_TYPE esp_schedule_nvs_init(char *nvs_partition, esp_schedule_priv_data_callbacks_t *priv_data_callbacks)
 {
     if (nvs_enabled) {
         ESP_SCHEDULE_LOGI(TAG, "NVS already enabled");
@@ -372,6 +404,9 @@ ESP_SCHEDULE_RETURN_TYPE esp_schedule_nvs_init(char *nvs_partition)
     if (esp_schedule_nvs_partition == NULL) {
         ESP_SCHEDULE_LOGE(TAG, "Could not allocate nvs_partition");
         return ESP_SCHEDULE_RET_NO_MEM;
+    }
+    if (priv_data_callbacks != NULL) {
+        nvs_priv_data_callbacks = *priv_data_callbacks;
     }
     nvs_enabled = true;
     return ESP_SCHEDULE_RET_OK;

@@ -27,7 +27,7 @@ ESP_SCHEDULE_RETURN_TYPE esp_schedule_nvs_remove(esp_schedule_t *schedule);
 ESP_SCHEDULE_RETURN_TYPE esp_schedule_nvs_remove_all(void);
 esp_schedule_handle_t *esp_schedule_nvs_get_all(uint8_t *schedule_count);
 bool esp_schedule_nvs_is_enabled(void);
-ESP_SCHEDULE_RETURN_TYPE esp_schedule_nvs_init(char *nvs_partition);
+ESP_SCHEDULE_RETURN_TYPE esp_schedule_nvs_init(char *nvs_partition, esp_schedule_priv_data_callbacks_t *priv_data_callbacks);
 
 /* Internal time calculation helpers (shared across implementation files) */
 bool esp_schedule_get_next_date_time(

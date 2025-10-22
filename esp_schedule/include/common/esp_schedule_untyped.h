@@ -59,6 +59,28 @@ typedef void (*esp_schedule_trigger_cb_t)(esp_schedule_handle_t handle, void *pr
  */
 typedef void (*esp_schedule_timestamp_cb_t)(esp_schedule_handle_t handle, uint32_t next_timestamp, void *priv_data);
 
+/** Callback for saving private data
+ *
+ * This callback is called when the private data is to be saved to NVS.
+ * Translate the private data to a binary format and save it to the data pointer.
+ * @note if p_data is NULL, then return the required size of the data buffer in p_data_len.
+ * @param[in] priv_data Pointer to the private data to be saved.
+ * @param[out] p_data Pointer to the data to be saved. This is a binary buffer. This will be freed by the caller.
+ * @param[out] p_data_len Pointer to the length of the data to be saved.
+ */
+typedef void (*esp_schedule_priv_data_save_cb_t)(void *priv_data, void **p_data, size_t *p_data_len);
+
+/** Callback for loading private data
+ *
+ * This callback is called when the private data is to be loaded from NVS.
+ * Translate the binary data to the private data.
+ *
+ * @param[in] data Pointer to the data to be loaded. This will be freed by the caller.
+ * @param[in] data_len Length of the data to be loaded.
+ * @param[out] p_priv_data Pointer to the private data to be loaded.
+ */
+typedef void (*esp_schedule_priv_data_load_cb_t)(void *data, size_t data_len, void **p_priv_data);
+
 /** Schedule type */
 typedef enum esp_schedule_type {
     ESP_SCHEDULE_TYPE_INVALID = 0,
@@ -179,6 +201,12 @@ typedef struct esp_schedule_config {
     esp_schedule_validity_t validity;
 } esp_schedule_config_t;
 
+/** Private data callbacks */
+typedef struct esp_schedule_priv_data_callbacks {
+    esp_schedule_priv_data_save_cb_t on_save; // Callback for saving private data to NVS.
+    esp_schedule_priv_data_load_cb_t on_load; // Callback for loading private data from NVS.
+} esp_schedule_priv_data_callbacks_t;
+
 /** Initialize ESP Schedule
  *
  * This initializes ESP Schedule. This must be called first before calling any of the other APIs.
@@ -190,11 +218,14 @@ typedef struct esp_schedule_config {
  * @param[in] enable_nvs If NVS is to be enabled or not.
  * @param[in] nvs_partition (Optional) The NVS partition to be used. If NULL is passed, the default partition is used.
  * @param[out] schedule_count Number of active schedules found in NVS.
+ * @param[in] priv_data_callbacks (Optional) Private data callbacks. If NULL is passed, then no private data will be saved or loaded.
+ * - on_save: Callback for saving private data to NVS.
+ * - on_load: Callback for loading private data from NVS.
  *
  * @return Array of schedule handles if any schedules have been found.
  * @return NULL if no schedule is found in NVS (or if NVS is not enabled).
  */
-esp_schedule_handle_t *esp_schedule_init(bool enable_nvs, char *nvs_partition, uint8_t *schedule_count);
+esp_schedule_handle_t *esp_schedule_init(bool enable_nvs, char *nvs_partition, uint8_t *schedule_count, esp_schedule_priv_data_callbacks_t *priv_data_callbacks);
 
 /** Create Schedule
  *
