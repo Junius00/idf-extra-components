@@ -7,7 +7,6 @@
 #include <inttypes.h>
 #include <esp_log.h>
 #include <esp_sntp.h>
-#include <esp_rmaker_utils.h>
 #include <esp_daylight.h>
 #include "esp_schedule_internal.h"
 
@@ -481,7 +480,7 @@ static bool esp_schedule_is_expired(esp_schedule_trigger_t *trigger)
             /* Relative seconds based schedule has expired */
             return true;
         } else if (trigger->next_scheduled_time_utc == 0) {
-            /* Schedule has been disabled , so it is as good as expired. */
+            /* Schedule has been disabled, so it is as good as expired. */
             return true;
         }
     } else if (trigger->type == ESP_SCHEDULE_TYPE_DAYS_OF_WEEK) {

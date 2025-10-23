@@ -9,6 +9,19 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/timers.h>
 #include <esp_schedule.h>
+#include "esp_heap_caps.h"
+
+/** Memory allocation macros for external RAM */
+#if ((CONFIG_SPIRAM || CONFIG_SPIRAM_SUPPORT) && \
+        (CONFIG_SPIRAM_USE_CAPS_ALLOC || CONFIG_SPIRAM_USE_MALLOC))
+#define MEM_ALLOC_EXTRAM(size)         heap_caps_malloc_prefer(size, 2, MALLOC_CAP_DEFAULT | MALLOC_CAP_SPIRAM, MALLOC_CAP_DEFAULT | MALLOC_CAP_INTERNAL)
+#define MEM_CALLOC_EXTRAM(num, size)   heap_caps_calloc_prefer(num, size, 2, MALLOC_CAP_DEFAULT | MALLOC_CAP_SPIRAM, MALLOC_CAP_DEFAULT | MALLOC_CAP_INTERNAL)
+#define MEM_REALLOC_EXTRAM(ptr, size)  heap_caps_realloc_prefer(ptr, size, 2, MALLOC_CAP_DEFAULT | MALLOC_CAP_SPIRAM, MALLOC_CAP_DEFAULT | MALLOC_CAP_INTERNAL)
+#else
+#define MEM_ALLOC_EXTRAM(size)         malloc(size)
+#define MEM_CALLOC_EXTRAM(num, size)   calloc(num, size)
+#define MEM_REALLOC_EXTRAM(ptr, size)  realloc(ptr, size)
+#endif
 
 typedef struct esp_schedule {
     char name[MAX_SCHEDULE_NAME_LEN + 1];
