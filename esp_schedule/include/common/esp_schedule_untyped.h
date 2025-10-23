@@ -316,7 +316,7 @@ ESP_SCHEDULE_RETURN_TYPE esp_schedule_disable(esp_schedule_handle_t handle);
  *
  * @return ESP_SCHEDULE_RET_OK on success, otherwise error code.
  */
-esp_schedule_return_type_t esp_schedule_reset_trigger_timestamps(esp_schedule_handle_t handle);
+ESP_SCHEDULE_RETURN_TYPE esp_schedule_reset_trigger_timestamps(esp_schedule_handle_t handle);
 
 /** Get Schedule
  *
