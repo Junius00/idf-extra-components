@@ -235,7 +235,7 @@ esp_schedule_handle_t *esp_schedule_nvs_get_all(uint8_t *schedule_count)
     esp_err_t err = nvs_entry_find(esp_schedule_nvs_partition, ESP_SCHEDULE_NVS_NAMESPACE, NVS_TYPE_BLOB, &nvs_iterator);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "No entry found in NVS");
-        return NULL;;
+        return NULL;
     }
     while (err == ESP_OK) {
         nvs_entry_info(nvs_iterator, &nvs_entry);

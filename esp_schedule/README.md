@@ -13,7 +13,7 @@ This component is used internally by ESP RainMaker to implement schedules.
 
 void app_schedule_trigger_cb(esp_schedule_handle_t handle, void *priv_data)
 {
-    printf("priv_data: %.*s\n", (char *)priv_data);
+    printf("priv_data: %s\n", (char *)priv_data);
 }
 
 static char *priv_data_global = "from app";
