@@ -699,6 +699,7 @@ esp_schedule_handle_t *esp_schedule_init(bool enable_nvs, char *nvs_partition, u
     for (int handle_count = *schedule_count - 1; handle_count >= 0; handle_count--) {
         schedule = (esp_schedule_t *)handle_list[handle_count];
         schedule->trigger_cb = NULL;
+        schedule->timestamp_cb = NULL;
         schedule->timer = NULL;
         /* Check for ONCE and expired schedules and delete them. */
         if (esp_schedule_is_expired(schedule)) {
@@ -706,7 +707,7 @@ esp_schedule_handle_t *esp_schedule_init(bool enable_nvs, char *nvs_partition, u
             ESP_SCHEDULE_LOGI(TAG, "Schedule %s does not repeat and has already expired. Deleting it.", schedule->name);
             esp_schedule_delete((esp_schedule_handle_t)schedule);
             /* Removing the schedule from the list */
-            for (int i = handle_count; i < *schedule_count - 1; i++) {
+            for (int i = handle_count; i < *schedule_count - 2; i++) {
                 handle_list[i] = handle_list[i + 1];
             }
             handle_list[*schedule_count - 1] = NULL;
