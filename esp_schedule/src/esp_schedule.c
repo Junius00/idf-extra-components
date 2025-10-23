@@ -1,13 +1,13 @@
 /*
- * SPDX-FileCopyrightText: 2023 Espressif Systems (Shanghai) CO LTD
+ * SPDX-FileCopyrightText: 2025 Espressif Systems (Shanghai) CO LTD
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 #include <string.h>
 #include <inttypes.h>
-#include <esp_log.h>
-#include <esp_sntp.h>
-#include <esp_daylight.h>
+#include "esp_log.h"
+#include "esp_sntp.h"
+#include "esp_daylight.h"
 #include "esp_schedule_internal.h"
 
 static const char *TAG = "esp_schedule";
@@ -489,7 +489,7 @@ static bool esp_schedule_is_expired(esp_schedule_trigger_t *trigger)
                 /* One time schedule has expired */
                 return true;
             } else if (trigger->next_scheduled_time_utc == 0) {
-                /* Schedule has been disabled , so it is as good as expired. */
+                /* Schedule has been disabled, so it is as good as expired. */
                 return true;
             }
         }
@@ -501,7 +501,7 @@ static bool esp_schedule_is_expired(esp_schedule_trigger_t *trigger)
                 /* One time solar schedule has expired */
                 return true;
             } else if (trigger->next_scheduled_time_utc == 0) {
-                /* Schedule has been disabled , so it is as good as expired. */
+                /* Schedule has been disabled, so it is as good as expired. */
                 return true;
             }
         }
@@ -594,7 +594,7 @@ static void esp_schedule_common_timer_cb(TimerHandle_t timer)
             localtime_r(&schedule->validity.start_time, &validity_time);
             strftime(time_str, sizeof(time_str), "%c %z[%Z]", &validity_time);
             ESP_LOGW(TAG, "Schedule %s skipped. It will be active only after: %s. DST: %s.", schedule->name, time_str, validity_time.tm_isdst ? "Yes" : "No");
-            /* TODO: Start the timer such that the next time it triggeres, it will be within the valid window.
+            /* TODO: Start the timer such that the next time it triggers, it will be within the valid window.
              * Currently, it will just keep triggering and then get skipped if not in valid range.
              */
             goto restart_schedule;

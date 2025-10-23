@@ -1,14 +1,14 @@
 /*
- * SPDX-FileCopyrightText: 2023 Espressif Systems (Shanghai) CO LTD
+ * SPDX-FileCopyrightText: 2025 Espressif Systems (Shanghai) CO LTD
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
 #pragma once
 
-#include <freertos/FreeRTOS.h>
-#include <freertos/timers.h>
-#include <esp_schedule.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/timers.h"
+#include "esp_schedule.h"
 #include "esp_heap_caps.h"
 
 /** Memory allocation macros for external RAM */

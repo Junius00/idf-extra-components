@@ -1,4 +1,4 @@
-// Copyright 2020 Espressif Systems (Shanghai) PTE LTD
+// Copyright 2025 Espressif Systems (Shanghai) CO LTD
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,8 +14,8 @@
 
 #include <string.h>
 #include <time.h>
-#include <esp_log.h>
-#include <nvs.h>
+#include "esp_log.h"
+#include "nvs.h"
 #include "esp_schedule_internal.h"
 
 static const char *TAG = "esp_schedule_nvs";
