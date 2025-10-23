@@ -2,14 +2,21 @@
 
 [![Component Registry](https://components.espressif.com/components/espressif/esp_schedule/badge.svg)](https://components.espressif.com/components/espressif/esp_schedule)
 
-This component is used internally by ESP RainMaker to implement schedules.
+This component is used to implement scheduling for:
 
-> Note: By default, the time is w.r.t. UTC. If the timezone has been set, then the time is w.r.t. the specified timezone.
+- **One-shot events** with a relative time difference (e.g., 30 seconds into the future)
+- **Periodic events** based on a certain time[^1] on days of the week (e.g., every Monday or Wednesday)
+- **Periodic/one-shot events** on a certain time[^1] based on the date:
+  - e.g., *(periodic)* every 23rd of January to April
+  - e.g., *(one-shot)* 9th of August, 2026
+- **Periodic events** at an offset from sunrise/sunset
 
-## Test code:
+[^1]: By default, the time is w.r.t. UTC. If the timezone has been set, then the time is w.r.t. the specified timezone.
 
-```cpp
-#include <esp_schedule.h>
+## Example Usage
+
+```c
+#include "esp_schedule.h"
 
 void app_schedule_trigger_cb(esp_schedule_handle_t handle, void *priv_data)
 {
@@ -18,7 +25,7 @@ void app_schedule_trigger_cb(esp_schedule_handle_t handle, void *priv_data)
 
 static char *priv_data_global = "from app";
 
-void app_schedule_set()
+void app_schedule_set(void)
 {
     esp_schedule_config_t schedule_config = {
         .name = "test",
@@ -32,7 +39,7 @@ void app_schedule_set()
     esp_schedule_create(&schedule_config);
 }
 
-void app_schedule_init()
+void app_schedule_init(void)
 {
     uint8_t schedule_count;
     esp_schedule_handle_t *schedule_list = esp_schedule_init(true, NULL, &schedule_count);
