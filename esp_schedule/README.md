@@ -8,7 +8,7 @@ This component is used internally by ESP RainMaker to implement schedules.
 
 ## Test code:
 
-```
+```cpp
 #include <esp_schedule.h>
 
 void app_schedule_trigger_cb(esp_schedule_handle_t handle, void *priv_data)
