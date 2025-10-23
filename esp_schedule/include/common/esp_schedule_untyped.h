@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: 2023 Espressif Systems (Shanghai) CO LTD
+ * SPDX-FileCopyrightText: 2025 Espressif Systems (Shanghai) CO LTD
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -109,7 +109,7 @@ typedef enum esp_schedule_days {
 /** Schedule months. Used for ESP_SCHEDULE_TYPE_DATE. */
 typedef enum esp_schedule_months {
     ESP_SCHEDULE_MONTH_ONCE         = 0,
-    ESP_SCHEDULE_MONTH_ALL          = 0b1111111,
+    ESP_SCHEDULE_MONTH_ALL          = 0b111111111111,
     ESP_SCHEDULE_MONTH_JANUARY      = 1 << 0,
     ESP_SCHEDULE_MONTH_FEBRUARY     = 1 << 1,
     ESP_SCHEDULE_MONTH_MARCH        = 1 << 2,

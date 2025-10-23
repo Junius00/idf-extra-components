@@ -5,9 +5,18 @@
 
 #pragma once
 
-/** Use esp_rmaker_utils.h for memory allocation. */
-#include <esp_rmaker_utils.h>
-#define ESP_SCHEDULE_MALLOC(size) MEM_ALLOC_EXTRAM(size)
-#define ESP_SCHEDULE_CALLOC(num, size) MEM_CALLOC_EXTRAM(num, size)
-#define ESP_SCHEDULE_REALLOC(ptr, size) MEM_REALLOC_EXTRAM(ptr, size)
+/** Use esp_heap_caps.h for memory allocation in external RAM. */
+#include "esp_heap_caps.h"
+
+#if ((CONFIG_SPIRAM || CONFIG_SPIRAM_SUPPORT) && \
+        (CONFIG_SPIRAM_USE_CAPS_ALLOC || CONFIG_SPIRAM_USE_MALLOC))
+#define ESP_SCHEDULE_MALLOC(size)        heap_caps_malloc_prefer(size, 2, MALLOC_CAP_DEFAULT | MALLOC_CAP_SPIRAM, MALLOC_CAP_DEFAULT | MALLOC_CAP_INTERNAL)
+#define ESP_SCHEDULE_CALLOC(num, size)   heap_caps_calloc_prefer(num, size, 2, MALLOC_CAP_DEFAULT | MALLOC_CAP_SPIRAM, MALLOC_CAP_DEFAULT | MALLOC_CAP_INTERNAL)
+#define ESP_SCHEDULE_REALLOC(ptr, size)  heap_caps_realloc_prefer(ptr, size, 2, MALLOC_CAP_DEFAULT | MALLOC_CAP_SPIRAM, MALLOC_CAP_DEFAULT | MALLOC_CAP_INTERNAL)
+#else
+#define ESP_SCHEDULE_MALLOC(size)        malloc(size)
+#define ESP_SCHEDULE_CALLOC(num, size)   calloc(num, size)
+#define ESP_SCHEDULE_REALLOC(ptr, size)  realloc(ptr, size)
+#endif
+
 #define ESP_SCHEDULE_FREE(ptr) free(ptr)

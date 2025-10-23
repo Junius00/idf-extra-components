@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: 2023 Espressif Systems (Shanghai) CO LTD
+ * SPDX-FileCopyrightText: 2025 Espressif Systems (Shanghai) CO LTD
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -8,10 +8,10 @@
 #include <stdbool.h>
 #include <time.h>
 #include <inttypes.h>
-#include <glue_time.h>
-#include <glue_log.h>
-#include <glue_mem.h>
-#include <esp_daylight.h>
+#include "glue_time.h"
+#include "glue_log.h"
+#include "glue_mem.h"
+#include "esp_daylight.h"
 #include "esp_schedule_internal.h"
 
 static const char *TAG = "esp_schedule";

@@ -2,62 +2,30 @@
 
 [![Component Registry](https://components.espressif.com/components/espressif/esp_schedule/badge.svg)](https://components.espressif.com/components/espressif/esp_schedule)
 
-This component is used internally by ESP RainMaker to implement schedules.
+This component is used to implement scheduling for:
 
-> Note: By default, the time is w.r.t. UTC. If the timezone has been set, then the time is w.r.t. the specified timezone.
+- **One-shot events** with a relative time difference (e.g., 30 seconds into the future)
+- **Periodic events** based on a certain time[^1] on days of the week (e.g., every Monday or Wednesday)
+- **Periodic/one-shot events** on a certain time[^1] based on the date:
+  - e.g., *(periodic)* every 23rd of January to April
+  - e.g., *(one-shot)* 9th of August, 2026
+- **Periodic events** at an offset from sunrise/sunset
 
-## Test code:
+[^1]: By default, the time is w.r.t. UTC. If the timezone has been set, then the time is w.r.t. the specified timezone.
 
-```
-#include <esp_schedule.h>
+## Example Usage
 
-void app_schedule_trigger_cb(esp_schedule_handle_t handle, void *priv_data)
-{
-    printf("priv_data: %.*s\n", (char *)priv_data);
-}
+See the comprehensive example in [`examples/get_started/`](examples/get_started/) for a complete demonstration of all ESP Schedule features, including:
 
-static char *priv_data_global = "from app";
+- **Days of Week Scheduling** - Recurring events on specific weekdays
+- **Date-based Scheduling** - Monthly and yearly recurring events
+- **Relative Scheduling** - One-time delayed events
+- **Solar Scheduling** - Sunrise/sunset based events with location coordinates and day-of-week filtering
+- **Schedule Persistence** - NVS storage and recovery
+- **Callback Handling** - Trigger and timestamp callbacks
+- **Schedule Management** - Create, edit, enable, and disable schedules
 
-void app_schedule_set()
-{
-    // extend this list if using multiple triggers
-    esp_schedule_trigger_t trigger_list[] = {
-        // 9:23 PM every Friday and Saturday
-        {
-            .type = ESP_SCHEDULE_TYPE_DAYS_OF_WEEK,
-            .hours = 21,
-            .minutes = 23,
-            .day.repeat_days = ESP_SCHEDULE_DAY_FRIDAY | ESP_SCHEDULE_DAY_SATURDAY,
-        },
-    };
-    esp_schedule_config_t schedule_config = {
-        .name = "test",
-        .triggers = {
-            .list = trigger_list,
-            .count = sizeof(trigger_list) / sizeof(trigger_list[0]),
-        },
-        .trigger_cb = app_schedule_trigger_cb,
-        .priv_data = priv_data_global,
-    };
-    esp_schedule_create(&schedule_config);
-}
-
-void app_schedule_init()
-{
-    uint8_t schedule_count;
-    esp_schedule_handle_t *schedule_list = esp_schedule_init(true, NULL, &schedule_count);
-    if (schedule_count > 0 && schedule_list != NULL) {
-        ESP_LOGI(TAG, "Found %d schedule(s) in NVS.", schedule_count);
-        for (size_t i = 0; i < schedule_count; i++) {
-            esp_schedule_config_t schedule_config;
-            esp_schedule_get(schedule_list[i], &schedule_config);
-            schedule_config.trigger_cb = app_schedule_trigger_cb;
-            schedule_config.priv_data = priv_data_global;
-            esp_schedule_edit(schedule_list[i], &schedule_config);
-        }
-    }
-}
-```
+The example includes detailed documentation, build instructions, and demonstrates all schedule types with practical use cases.
 
 ## Triggers as a list
 

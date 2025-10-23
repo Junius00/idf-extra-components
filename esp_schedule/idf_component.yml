@@ -6,7 +6,6 @@ repository: https://github.com/espressif/idf-extra-components.git
 issues: https://github.com/espressif/esp-rainmaker/issues
 dependencies:
   idf: ">=5.1"
-  espressif/rmaker_common:
-    version: "~1.5.0"
   espressif/esp_daylight:
     version: "~1.0.1"
+    override_path: "../esp_daylight"
