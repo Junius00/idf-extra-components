@@ -1,14 +1,14 @@
 /*
- * SPDX-FileCopyrightText: 2023 Espressif Systems (Shanghai) CO LTD
+ * SPDX-FileCopyrightText: 2025 Espressif Systems (Shanghai) CO LTD
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 #include <string.h>
 #include <inttypes.h>
-#include <glue_time.h>
-#include <glue_log.h>
-#include <glue_mem.h>
-#include <esp_daylight.h>
+#include "glue_time.h"
+#include "glue_log.h"
+#include "glue_mem.h"
+#include "esp_daylight.h"
 #include "esp_schedule_internal.h"
 
 static const char *TAG = "esp_schedule";
@@ -484,7 +484,7 @@ static bool esp_schedule_is_expired(esp_schedule_trigger_t *trigger)
             /* Relative seconds based schedule has expired */
             return true;
         } else if (trigger->next_scheduled_time_utc == 0) {
-            /* Schedule has been disabled , so it is as good as expired. */
+            /* Schedule has been disabled, so it is as good as expired. */
             return true;
         }
     } else if (trigger->type == ESP_SCHEDULE_TYPE_DAYS_OF_WEEK) {
@@ -493,7 +493,7 @@ static bool esp_schedule_is_expired(esp_schedule_trigger_t *trigger)
                 /* One time schedule has expired */
                 return true;
             } else if (trigger->next_scheduled_time_utc == 0) {
-                /* Schedule has been disabled , so it is as good as expired. */
+                /* Schedule has been disabled, so it is as good as expired. */
                 return true;
             }
         }
@@ -505,7 +505,7 @@ static bool esp_schedule_is_expired(esp_schedule_trigger_t *trigger)
                 /* One time solar schedule has expired */
                 return true;
             } else if (trigger->next_scheduled_time_utc == 0) {
-                /* Schedule has been disabled , so it is as good as expired. */
+                /* Schedule has been disabled, so it is as good as expired. */
                 return true;
             }
         }

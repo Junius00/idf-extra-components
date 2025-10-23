@@ -6,11 +6,11 @@ list(APPEND ESP_SCHEDULE_SRCS "glue/esp/nvs.c"
                               "glue/esp/timer.c")
 list(APPEND ESP_SCHEDULE_INCLUDE_DIRS "include/esp")
 list(APPEND ESP_SCHEDULE_PRIV_INCLUDE_DIRS "glue/esp")
-list(APPEND ESP_SCHEDULE_PRIV_REQUIRES "nvs_flash" "rmaker_common")
+list(APPEND ESP_SCHEDULE_PRIV_REQUIRES "nvs_flash" "esp_netif")
 
 idf_component_register(SRCS ${ESP_SCHEDULE_SRCS}
                        INCLUDE_DIRS ${ESP_SCHEDULE_INCLUDE_DIRS}
                        PRIV_INCLUDE_DIRS ${ESP_SCHEDULE_PRIV_INCLUDE_DIRS}
                        PRIV_REQUIRES ${ESP_SCHEDULE_PRIV_REQUIRES})
 
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-unused-function")
+target_compile_options(${COMPONENT_LIB} PRIVATE -Wno-unused-function)

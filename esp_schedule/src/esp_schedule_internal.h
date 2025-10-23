@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: 2023 Espressif Systems (Shanghai) CO LTD
+ * SPDX-FileCopyrightText: 2025 Espressif Systems (Shanghai) CO LTD
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -7,7 +7,7 @@
 #pragma once
 
 #include "glue_timer.h"
-#include <esp_schedule.h>
+#include "esp_schedule.h"
 
 typedef struct esp_schedule {
     char name[MAX_SCHEDULE_NAME_LEN + 1];
