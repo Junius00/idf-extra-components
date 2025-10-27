@@ -437,41 +437,9 @@ static void esp_schedule_start_timer(esp_schedule_t *schedule)
 static void esp_schedule_common_timer_cb(void *priv_data)
 {
     esp_schedule_t *schedule = (esp_schedule_t *)priv_data;
-    time_t now;
-    esp_schedule_get_time(&now);
-    struct tm validity_time;
-    char time_str[64] = {0};
-    if (schedule->validity.start_time != 0) {
-        if (now < schedule->validity.start_time) {
-            memset(time_str, 0, sizeof(time_str));
-            localtime_r(&schedule->validity.start_time, &validity_time);
-            strftime(time_str, sizeof(time_str), "%c %z[%Z]", &validity_time);
-            ESP_SCHEDULE_LOGW(TAG, "Schedule %s skipped. It will be active only after: %s. DST: %s.", schedule->name, time_str, validity_time.tm_isdst ? "Yes" : "No");
-            /* TODO: Start the timer such that the next time it triggeres, it will be within the valid window.
-             * Currently, it will just keep triggering and then get skipped if not in valid range.
-             */
-            goto restart_schedule;
-        }
-    }
-    if (schedule->validity.end_time != 0) {
-        if (now > schedule->validity.end_time) {
-            localtime_r(&schedule->validity.end_time, &validity_time);
-            strftime(time_str, sizeof(time_str), "%c %z[%Z]", &validity_time);
-            ESP_SCHEDULE_LOGW(TAG, "Schedule %s skipped. It can't be active after: %s. DST: %s.", schedule->name, time_str, validity_time.tm_isdst ? "Yes" : "No");
-            /* Return from here will ensure that the timer does not start again for this schedule */
-            return;
-        }
-    }
     ESP_SCHEDULE_LOGI(TAG, "Schedule %s triggered", schedule->name);
     if (schedule->trigger_cb) {
         schedule->trigger_cb((esp_schedule_handle_t)schedule, schedule->priv_data);
-    }
-
-restart_schedule:
-
-    if (esp_schedule_is_expired(schedule)) {
-        /* Not deleting the schedule here. Just not starting it again. */
-        return;
     }
     esp_schedule_start_timer(schedule);
 }
