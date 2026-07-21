@@ -25,6 +25,11 @@ static const char *TAG = "esp_schedule_nvs";
 
 static char *esp_schedule_nvs_partition = NULL;
 static bool nvs_enabled = false;
+static esp_schedule_priv_data_callbacks_t nvs_priv_data_callbacks = {
+    .on_save = NULL,
+    .on_load = NULL,
+    .on_free = NULL,
+};
 
 esp_err_t esp_schedule_nvs_add(esp_schedule_t *schedule)
 {
@@ -55,12 +60,19 @@ esp_err_t esp_schedule_nvs_add(esp_schedule_t *schedule)
         ESP_LOGI(TAG, "Updating the existing schedule %s", schedule->name);
     }
 
-    /* Calculate total blob size: persistent header + trigger list */
+    /* Calculate total blob size: persistent header + trigger list + private data */
     size_t total_size = sizeof(esp_schedule_persistent_t);
     size_t trigger_list_size = 0;
+    size_t private_data_size = 0;
     if (schedule->triggers.count > 0 && schedule->triggers.list != NULL) {
         trigger_list_size = schedule->triggers.count * sizeof(esp_schedule_trigger_t);
         total_size += trigger_list_size;
+    }
+
+    /* Add private data size to total size if saving private data */
+    if (nvs_priv_data_callbacks.on_save != NULL) {
+        nvs_priv_data_callbacks.on_save(schedule->priv_data, NULL, &private_data_size);
+        total_size += private_data_size;
     }
 
     /* Allocate buffer for combined data */
@@ -84,6 +96,28 @@ esp_err_t esp_schedule_nvs_add(esp_schedule_t *schedule)
     /* Copy trigger list to end of buffer if it exists */
     if (trigger_list_size > 0) {
         memcpy(blob_buffer + sizeof(esp_schedule_persistent_t), schedule->triggers.list, trigger_list_size);
+    }
+
+    /* Add private data to end of buffer if saving private data. The buffer was
+     * sized using the length reported by the first (sizing) on_save call, so the
+     * second (data) call MUST report the same length. If it differs, abort the
+     * save rather than truncate or overflow the buffer. */
+    if (nvs_priv_data_callbacks.on_save != NULL && private_data_size > 0) {
+        void *data = NULL;
+        size_t data_size = 0;
+        nvs_priv_data_callbacks.on_save(schedule->priv_data, &data, &data_size);
+        if (data == NULL || data_size != private_data_size) {
+            ESP_LOGE(TAG, "priv data size mismatch between on_save calls (%u vs %u); aborting save",
+                     (unsigned)data_size, (unsigned)private_data_size);
+            if (data != NULL) {
+                free(data);
+            }
+            free(blob_buffer);
+            nvs_close(nvs_handle);
+            return ESP_FAIL;
+        }
+        memcpy(blob_buffer + sizeof(esp_schedule_persistent_t) + trigger_list_size, data, data_size);
+        free(data);
     }
 
     /* For a new schedule, read and validate the count BEFORE writing the blob,
@@ -399,6 +433,16 @@ static esp_schedule_handle_t esp_schedule_nvs_get(const char *nvs_key)
         schedule->triggers.count = 0;
     }
 
+    /* Load private data if a loader is registered. trigger_list_size is bounded
+     * by buf_size above, so this subtraction cannot underflow. */
+    size_t data_len = buf_size - schedule_size - trigger_list_size;
+    if (data_len > 0 && nvs_priv_data_callbacks.on_load != NULL) {
+        void *data = (void *) blob_buffer + schedule_size + trigger_list_size;
+        nvs_priv_data_callbacks.on_load(data, data_len, &schedule->priv_data);
+    } else {
+        schedule->priv_data = NULL;
+    }
+
     free(blob_buffer);
     ESP_LOGI(TAG, "Schedule %s found in NVS", schedule->name);
     return (esp_schedule_handle_t) schedule;
@@ -462,10 +506,24 @@ bool esp_schedule_nvs_is_enabled(void)
     return nvs_enabled;
 }
 
-esp_err_t esp_schedule_nvs_init(char *nvs_partition)
+void esp_schedule_nvs_free_loaded_priv_data(void *priv_data)
 {
+    if (priv_data != NULL && nvs_priv_data_callbacks.on_free != NULL) {
+        nvs_priv_data_callbacks.on_free(priv_data);
+    }
+}
+
+esp_err_t esp_schedule_nvs_init(char *nvs_partition, esp_schedule_priv_data_callbacks_t *priv_data_callbacks)
+{
+    /* Apply the callbacks unconditionally, even when NVS is already enabled: a
+     * caller that initialized first with no callbacks (e.g. via the legacy
+     * esp_schedule_init) and then re-initializes once its save/load handlers are
+     * ready must not have those callbacks silently dropped. */
+    if (priv_data_callbacks != NULL) {
+        nvs_priv_data_callbacks = *priv_data_callbacks;
+    }
     if (nvs_enabled) {
-        ESP_LOGI(TAG, "NVS already enabled");
+        ESP_LOGI(TAG, "NVS already enabled; callbacks updated");
         return ESP_OK;
     }
     if (nvs_partition) {
