@@ -130,3 +130,58 @@ s2.solar.offset_minutes = 10;
 ```
 
 These filters are applied when computing the next valid sunrise/sunset for your location. If both day-of-week and day-of-month are specified, they are combined using **OR**; month and year remain additional filters.
+
+## Triggers as a list
+
+Schedules can now contain multiple triggers. Instead of a single `trigger`, use `triggers` with a list and count. Each entry is an `esp_schedule_trigger_t` and the scheduler will trigger on the union of all entries.
+
+```
+#include "esp_schedule.h"
+
+static void my_trigger_cb(esp_schedule_handle_t handle, void *priv_data) {
+    // Handle trigger
+}
+
+void app_create_multi_trigger_schedule(void) {
+    static esp_schedule_trigger_t trigger_list[3];
+
+    // 1) Every Monday and Thursday at 13:30
+    trigger_list[0].type = ESP_SCHEDULE_TYPE_DAYS_OF_WEEK;
+    trigger_list[0].hours = 13;
+    trigger_list[0].minutes = 30;
+    trigger_list[0].day.repeat_days = ESP_SCHEDULE_DAY_MONDAY | ESP_SCHEDULE_DAY_THURSDAY;
+
+    // 2) Date-based: 19:30 on the 20th day of any month
+    trigger_list[1].type = ESP_SCHEDULE_TYPE_DATE;
+    trigger_list[1].hours = 19;
+    trigger_list[1].minutes = 30;
+    trigger_list[1].date.day = 20;                    // 20th of the month
+    trigger_list[1].date.repeat_months = 0;           // any month
+    trigger_list[1].date.year = 0;                    // any year
+    trigger_list[1].date.repeat_every_year = true;    // keep repeating
+
+    // 3) Sunrise with 15 minutes offset before, only on weekends
+#if CONFIG_ESP_SCHEDULE_ENABLE_DAYLIGHT
+    trigger_list[2].type = ESP_SCHEDULE_TYPE_SUNRISE;
+    trigger_list[2].hours = 0;    // ignored by solar types
+    trigger_list[2].minutes = 0;  // ignored by solar types
+    trigger_list[2].day.repeat_days = ESP_SCHEDULE_DAY_SATURDAY | ESP_SCHEDULE_DAY_SUNDAY;
+    trigger_list[2].date.day = 0;                 // use day-of-week pattern
+    trigger_list[2].date.repeat_months = 0;       // any month
+    trigger_list[2].date.year = 0;                // any year
+    trigger_list[2].date.repeat_every_year = true;
+    trigger_list[2].solar.latitude = 37.7749;     // San Francisco
+    trigger_list[2].solar.longitude = -122.4194;
+    trigger_list[2].solar.offset_minutes = -15;   // 15 minutes before sunrise
+#endif
+
+    esp_schedule_config_t cfg = { 0 };
+    strncpy(cfg.name, "multi", sizeof(cfg.name) - 1);
+    cfg.triggers.list = trigger_list;
+    cfg.triggers.count = sizeof(trigger_list) / sizeof(trigger_list[0]);
+    cfg.trigger_cb = my_trigger_cb;
+
+    esp_schedule_handle_t h = esp_schedule_create(&cfg);
+    (void)h;
+}
+```

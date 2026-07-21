@@ -22,6 +22,7 @@ static bool init_done = false;
 
 // Forward declarations for static functions
 static void esp_schedule_common_timer_cb(TimerHandle_t timer);
+static esp_err_t esp_schedule_start_timer(esp_schedule_t *schedule);
 
 /*
  * Unified date-based next occurrence calculation.
@@ -381,48 +382,88 @@ static bool esp_schedule_set_next_scheduled_time_utc(const char *schedule_name, 
 }
 
 /*
- * Compute the seconds until the next occurrence of this schedule's single
- * trigger, updating trigger->next_scheduled_time_utc. Returns 0 if there is no
- * valid future occurrence (expired, disabled, or calculation failed).
+ * Calculate the next time diff across all triggers and set schedule->next_scheduled_time_utc
+ * to the chosen (nearest future) occurrence. Returns 0 (and clears the chosen timestamp) if no
+ * trigger has a valid future occurrence.
  */
-static uint32_t esp_schedule_get_next_schedule_time_diff(esp_schedule_t *schedule)
+static uint32_t esp_schedule_get_next_schedule_time_diff_multi(esp_schedule_t *schedule)
 {
-    time_t now;
+    if (schedule == NULL) {
+        return 0;
+    }
+
+    const char *schedule_name = schedule->name;
+
+    /* If no trigger list provided, nothing to schedule */
+    if (schedule->triggers.list == NULL || schedule->triggers.count == 0) {
+        schedule->next_scheduled_time_utc = 0;
+        return 0;
+    }
+
+    uint32_t best_diff = 0;
+    bool best_set = false;
+    time_t best_utc = 0;
+    time_t now = 0;
     time(&now);
 
-    if (!esp_schedule_set_next_scheduled_time_utc(schedule->name, &schedule->trigger, &schedule->validity)) {
-        schedule->trigger.next_scheduled_time_utc = 0;
+    for (uint8_t i = 0; i < schedule->triggers.count; i++) {
+        esp_schedule_trigger_t *tr = &schedule->triggers.list[i];
+        /* Compute or reuse next_scheduled_time_utc */
+        bool ok = esp_schedule_set_next_scheduled_time_utc(schedule_name, tr, &schedule->validity);
+        if (!ok) {
+            continue;
+        }
+        /* Select nearest future ts */
+        if (tr->next_scheduled_time_utc > now) {
+            uint32_t diff = (uint32_t)difftime(tr->next_scheduled_time_utc, now);
+            if (!best_set || diff < best_diff) {
+                best_set = true;
+                best_diff = diff;
+                best_utc = tr->next_scheduled_time_utc;
+            }
+        }
+    }
+
+    if (!best_set) {
+        /* No valid trigger */
+        schedule->next_scheduled_time_utc = 0;
         return 0;
     }
-    if (schedule->trigger.next_scheduled_time_utc <= now) {
-        return 0;
-    }
+
+    /* Store the chosen timestamp */
+    schedule->next_scheduled_time_utc = best_utc;
 
     /* Print chosen schedule time once */
-    char time_str[64];
-    struct tm schedule_time;
-    localtime_r(&schedule->trigger.next_scheduled_time_utc, &schedule_time);
-    memset(time_str, 0, sizeof(time_str));
-    strftime(time_str, sizeof(time_str), "%c %z[%Z]", &schedule_time);
-    ESP_LOGI(TAG, "Schedule %s will be active on: %s. DST: %s", schedule->name, time_str, schedule_time.tm_isdst ? "Yes" : "No");
-
-    return (uint32_t)difftime(schedule->trigger.next_scheduled_time_utc, now);
+    {
+        char time_str[64];
+        struct tm schedule_time;
+        memset(&schedule_time, 0, sizeof(schedule_time));
+        localtime_r(&best_utc, &schedule_time);
+        memset(time_str, 0, sizeof(time_str));
+        strftime(time_str, sizeof(time_str), "%c %z[%Z]", &schedule_time);
+        ESP_LOGI(TAG, "Schedule %s will be active on: %s. DST: %s", schedule_name, time_str, schedule_time.tm_isdst ? "Yes" : "No");
+    }
+    return best_diff;
 }
 
 static void esp_schedule_stop_timer(esp_schedule_t *schedule)
 {
-    xTimerStop(schedule->timer, portMAX_DELAY);
+    if (schedule->timer) {
+        xTimerStop(schedule->timer, portMAX_DELAY);
+    }
 }
 
 /*
- * Arm the FreeRTOS software timer for the given number of seconds. The period
- * is computed in 64-bit and clamped so that a large seconds value cannot
+ * Ensure the schedule's timer exists and (re)arm it for the given number of
+ * seconds. Creates the FreeRTOS software timer lazily on the first arm. The
+ * period is computed in 64-bit and clamped so that a large seconds value cannot
  * overflow the 32-bit tick math ((seconds * 1000) used to overflow for diffs
  * beyond ~49 days). If the requested delay exceeds what a single TickType_t
  * period can represent, it is clamped; esp_schedule_common_timer_cb re-arms for
  * the remaining time when it detects an early expiry.
+ * Returns ESP_ERR_NO_MEM if the timer could not be created.
  */
-static void esp_schedule_arm_timer(esp_schedule_t *schedule, uint32_t seconds)
+static esp_err_t esp_schedule_arm_timer(esp_schedule_t *schedule, uint32_t seconds)
 {
     uint64_t ticks = ((uint64_t)seconds * 1000ULL) / (uint64_t)portTICK_PERIOD_MS;
     if (ticks == 0) {
@@ -434,11 +475,29 @@ static void esp_schedule_arm_timer(esp_schedule_t *schedule, uint32_t seconds)
     if (ticks > max_ticks) {
         ticks = max_ticks;
     }
-    xTimerStop(schedule->timer, portMAX_DELAY);
-    xTimerChangePeriod(schedule->timer, (TickType_t)ticks, portMAX_DELAY);
+    if (schedule->timer == NULL) {
+        /* Create with the real period and start it (one-shot; pdFALSE = no auto-reload). */
+        schedule->timer = xTimerCreate("schedule", (TickType_t)ticks, pdFALSE, (void *)schedule, esp_schedule_common_timer_cb);
+        if (schedule->timer == NULL) {
+            return ESP_ERR_NO_MEM;
+        }
+        xTimerStart(schedule->timer, portMAX_DELAY);
+    } else {
+        /* xTimerChangePeriod sets the new period and (re)starts the timer. */
+        xTimerChangePeriod(schedule->timer, (TickType_t)ticks, portMAX_DELAY);
+    }
+    return ESP_OK;
 }
 
-static void esp_schedule_start_timer(esp_schedule_t *schedule)
+static void esp_schedule_delete_timer(esp_schedule_t *schedule)
+{
+    if (schedule->timer) {
+        xTimerDelete(schedule->timer, portMAX_DELAY);
+        schedule->timer = NULL;
+    }
+}
+
+static esp_err_t esp_schedule_start_timer(esp_schedule_t *schedule)
 {
     time_t current_time = 0;
     time(&current_time);
@@ -446,31 +505,36 @@ static void esp_schedule_start_timer(esp_schedule_t *schedule)
         ESP_LOGE(TAG, "Time is not updated");
         /* Time is no longer valid (e.g. RTC lost). Stop any already-armed timer
          * and clear the chosen time so we don't keep firing on a stale diff. It
-         * will be recomputed once time is synced and the schedule re-enabled. */
-        if (schedule->timer) {
-            esp_schedule_stop_timer(schedule);
-        }
-        schedule->trigger.next_scheduled_time_utc = 0;
-        return;
+         * will be recomputed once time is synced and the schedule re-enabled.
+         * This is a transient condition, not an arming failure. */
+        esp_schedule_stop_timer(schedule);
+        schedule->next_scheduled_time_utc = 0;
+        return ESP_OK;
     }
 
-    schedule->next_scheduled_time_diff = esp_schedule_get_next_schedule_time_diff(schedule);
+    schedule->next_scheduled_time_diff = esp_schedule_get_next_schedule_time_diff_multi(schedule);
 
     /* Check if schedule calculation failed (returns 0) */
     if (schedule->next_scheduled_time_diff == 0) {
         ESP_LOGW(TAG, "Schedule %s calculation failed or returned invalid time. Skipping timer creation.", schedule->name);
-        /* Reset timestamp to indicate schedule is not active */
-        schedule->trigger.next_scheduled_time_utc = 0;
-        return;
+        /* Reset timestamp to indicate schedule is not active. No future
+         * occurrence is not an error, so report success. */
+        schedule->next_scheduled_time_utc = 0;
+        return ESP_OK;
     }
 
     ESP_LOGI(TAG, "Starting a timer for %"PRIu32" seconds for schedule %s", schedule->next_scheduled_time_diff, schedule->name);
 
     if (schedule->timestamp_cb) {
-        schedule->timestamp_cb((esp_schedule_handle_t)schedule, (uint32_t)schedule->trigger.next_scheduled_time_utc, schedule->priv_data);
+        schedule->timestamp_cb((esp_schedule_handle_t)schedule, schedule->next_scheduled_time_utc, schedule->priv_data);
     }
 
-    esp_schedule_arm_timer(schedule, schedule->next_scheduled_time_diff);
+    esp_err_t ret = esp_schedule_arm_timer(schedule, schedule->next_scheduled_time_diff);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to arm timer for schedule %s", schedule->name);
+        schedule->next_scheduled_time_utc = 0;
+    }
+    return ret;
 }
 
 static void esp_schedule_common_timer_cb(TimerHandle_t timer)
@@ -483,12 +547,10 @@ static void esp_schedule_common_timer_cb(TimerHandle_t timer)
 
     /* Guard against a premature timer expiry: if the scheduled instant has not
      * actually arrived (e.g. tick truncation on a very long delay that had to be
-     * clamped), re-arm for the remaining time instead of firing early.
-     * esp_schedule_start_timer recomputes the diff from the still-future
-     * next_scheduled_time_utc, so it re-arms for what remains. */
+     * clamped), re-arm for the remaining time instead of firing early. */
     time_t now = 0;
     time(&now);
-    if (schedule->trigger.next_scheduled_time_utc > now) {
+    if (schedule->next_scheduled_time_utc > now) {
         ESP_LOGW(TAG, "Schedule %s fired early; rescheduling for the remaining time", schedule->name);
         esp_schedule_start_timer(schedule);
         return;
@@ -513,23 +575,6 @@ static void esp_schedule_common_timer_cb(TimerHandle_t timer)
     esp_schedule_start_timer(schedule);
 }
 
-static void esp_schedule_delete_timer(esp_schedule_t *schedule)
-{
-    xTimerDelete(schedule->timer, portMAX_DELAY);
-}
-
-static void esp_schedule_create_timer(esp_schedule_t *schedule)
-{
-    if (esp_schedule_nvs_is_enabled()) {
-        /* This is used for calculating next_scheduled_time_utc, and only used when NVS is enabled.
-         * If NVS is enabled, time will already be synced and the time will be correctly calculated. */
-        schedule->next_scheduled_time_diff = esp_schedule_get_next_schedule_time_diff(schedule);
-    }
-
-    /* Temporarily setting the timer for 1 (anything greater than 0) tick. This will get changed when xTimerChangePeriod() is called. */
-    schedule->timer = xTimerCreate("schedule", 1, pdFALSE, (void *)schedule, esp_schedule_common_timer_cb);
-}
-
 esp_err_t esp_schedule_get(esp_schedule_handle_t handle, esp_schedule_config_t *schedule_config)
 {
     if (schedule_config == NULL) {
@@ -540,24 +585,39 @@ esp_err_t esp_schedule_get(esp_schedule_handle_t handle, esp_schedule_config_t *
     }
     esp_schedule_t *schedule = (esp_schedule_t *)handle;
 
-    strlcpy(schedule_config->name, schedule->name, sizeof(schedule_config->name));
-    schedule_config->trigger.type = schedule->trigger.type;
-    schedule_config->trigger.hours = schedule->trigger.hours;
-    schedule_config->trigger.minutes = schedule->trigger.minutes;
-    if (schedule->trigger.type == ESP_SCHEDULE_TYPE_DAYS_OF_WEEK) {
-        schedule_config->trigger.day.repeat_days = schedule->trigger.day.repeat_days;
-    } else if (schedule->trigger.type == ESP_SCHEDULE_TYPE_DATE) {
-        schedule_config->trigger.date.day = schedule->trigger.date.day;
-        schedule_config->trigger.date.repeat_months = schedule->trigger.date.repeat_months;
-        schedule_config->trigger.date.year = schedule->trigger.date.year;
-        schedule_config->trigger.date.repeat_every_year = schedule->trigger.date.repeat_every_year;
+    /* Copy trigger list. Handle the empty case explicitly: allocating 0 bytes is
+     * implementation-defined (may return NULL) and would be a spurious error. */
+    if (schedule->triggers.count == 0 || schedule->triggers.list == NULL) {
+        schedule_config->triggers.list = NULL;
+        schedule_config->triggers.count = 0;
+    } else {
+        size_t trigger_list_size = schedule->triggers.count * sizeof(esp_schedule_trigger_t);
+        schedule_config->triggers.list = (esp_schedule_trigger_t *)MEM_ALLOC_EXTRAM(trigger_list_size);
+        if (schedule_config->triggers.list == NULL) {
+            return ESP_ERR_NO_MEM;
+        }
+        memcpy(schedule_config->triggers.list, schedule->triggers.list, trigger_list_size);
+        schedule_config->triggers.count = schedule->triggers.count;
     }
 
+    strlcpy(schedule_config->name, schedule->name, sizeof(schedule_config->name));
     schedule_config->trigger_cb = schedule->trigger_cb;
     schedule_config->timestamp_cb = schedule->timestamp_cb;
     schedule_config->priv_data = schedule->priv_data;
     schedule_config->validity = schedule->validity;
     return ESP_OK;
+}
+
+void esp_schedule_config_free_internals(esp_schedule_config_t *schedule_config)
+{
+    if (schedule_config == NULL) {
+        return;
+    }
+    if (schedule_config->triggers.list) {
+        free(schedule_config->triggers.list);
+        schedule_config->triggers.list = NULL;
+        schedule_config->triggers.count = 0;
+    }
 }
 
 esp_err_t esp_schedule_enable(esp_schedule_handle_t handle)
@@ -566,8 +626,7 @@ esp_err_t esp_schedule_enable(esp_schedule_handle_t handle)
         return ESP_ERR_INVALID_ARG;
     }
     esp_schedule_t *schedule = (esp_schedule_t *)handle;
-    esp_schedule_start_timer(schedule);
-    return ESP_OK;
+    return esp_schedule_start_timer(schedule);
 }
 
 esp_err_t esp_schedule_disable(esp_schedule_handle_t handle)
@@ -577,51 +636,88 @@ esp_err_t esp_schedule_disable(esp_schedule_handle_t handle)
     }
     esp_schedule_t *schedule = (esp_schedule_t *)handle;
     esp_schedule_stop_timer(schedule);
-    /* Disabling a schedule should also reset the next_scheduled_time.
-     * It would be re-computed after enabling.
-     */
-    schedule->trigger.next_scheduled_time_utc = 0;
+    /* Disabling a schedule resets the cached next-fire times so they are fully
+     * recomputed on the next enable. Both the schedule-level chosen time AND the
+     * per-trigger times must be cleared: the re-arm path reads the per-trigger
+     * next_scheduled_time_utc and, if left stale (already passed), would treat a
+     * RELATIVE or one-shot trigger as already fired and never re-arm it. */
+    schedule->next_scheduled_time_utc = 0;
+    for (uint8_t i = 0; i < schedule->triggers.count; i++) {
+        schedule->triggers.list[i].next_scheduled_time_utc = 0;
+    }
     return ESP_OK;
 }
 
 static esp_err_t esp_schedule_set(esp_schedule_t *schedule, esp_schedule_config_t *schedule_config)
 {
-    /* Setting everything apart from name. */
-    schedule->trigger.type = schedule_config->trigger.type;
-    if (schedule->trigger.type == ESP_SCHEDULE_TYPE_RELATIVE) {
-        schedule->trigger.relative_seconds = schedule_config->trigger.relative_seconds;
-        schedule->trigger.next_scheduled_time_utc = schedule_config->trigger.next_scheduled_time_utc;
-    } else {
-        schedule->trigger.hours = schedule_config->trigger.hours;
-        schedule->trigger.minutes = schedule_config->trigger.minutes;
-
-        if (schedule->trigger.type == ESP_SCHEDULE_TYPE_DAYS_OF_WEEK) {
-            schedule->trigger.day.repeat_days = schedule_config->trigger.day.repeat_days;
-        } else if (schedule->trigger.type == ESP_SCHEDULE_TYPE_DATE) {
-            schedule->trigger.date.day = schedule_config->trigger.date.day;
-            schedule->trigger.date.repeat_months = schedule_config->trigger.date.repeat_months;
-            schedule->trigger.date.year = schedule_config->trigger.date.year;
-            schedule->trigger.date.repeat_every_year = schedule_config->trigger.date.repeat_every_year;
-#if CONFIG_ESP_SCHEDULE_ENABLE_DAYLIGHT
-        } else if (schedule->trigger.type == ESP_SCHEDULE_TYPE_SUNRISE || schedule->trigger.type == ESP_SCHEDULE_TYPE_SUNSET) {
-            schedule->trigger.solar.latitude = schedule_config->trigger.solar.latitude;
-            schedule->trigger.solar.longitude = schedule_config->trigger.solar.longitude;
-            schedule->trigger.solar.offset_minutes = schedule_config->trigger.solar.offset_minutes;
-            /* Copy day and date fields for unified solar schedule approach */
-            schedule->trigger.day.repeat_days = schedule_config->trigger.day.repeat_days;
-            schedule->trigger.date.day = schedule_config->trigger.date.day;
-            schedule->trigger.date.repeat_months = schedule_config->trigger.date.repeat_months;
-            schedule->trigger.date.year = schedule_config->trigger.date.year;
-            schedule->trigger.date.repeat_every_year = schedule_config->trigger.date.repeat_every_year;
-#endif
+    /* Build the new trigger list first, without touching the schedule, so a
+     * later failure (allocation or persistence) can leave the schedule exactly
+     * as it was. */
+    esp_schedule_trigger_t *new_list = NULL;
+    uint8_t new_count = 0;
+    if (schedule_config->triggers.count > 0 && schedule_config->triggers.list != NULL) {
+        size_t bytes = (size_t)schedule_config->triggers.count * sizeof(esp_schedule_trigger_t);
+        new_list = (esp_schedule_trigger_t *)MEM_CALLOC_EXTRAM(1, bytes);
+        if (new_list == NULL) {
+            return ESP_ERR_NO_MEM;
         }
+        memcpy(new_list, schedule_config->triggers.list, bytes);
+        new_count = schedule_config->triggers.count;
     }
 
+    /* Stop and tear down any running timer BEFORE mutating the trigger list.
+     * esp_schedule_delete_timer() barriers against an in-flight timer callback
+     * (which runs in the FreeRTOS timer daemon task and re-reads the trigger
+     * list), so the swap below and the free of the old list cannot race it. */
+    if (schedule->timer != NULL) {
+        esp_schedule_delete_timer(schedule);
+    }
+
+    /* Snapshot the current state so we can roll back if persistence fails. The
+     * old trigger list is kept (not freed) until we know the change stuck. */
+    esp_schedule_trigger_list_t old_triggers = schedule->triggers;
+    esp_schedule_validity_t old_validity = schedule->validity;
+    esp_schedule_trigger_cb_t old_trigger_cb = schedule->trigger_cb;
+    esp_schedule_timestamp_cb_t old_timestamp_cb = schedule->timestamp_cb;
+    void *old_priv_data = schedule->priv_data;
+    time_t old_next = schedule->next_scheduled_time_utc;
+
+    /* Apply the new state. */
+    schedule->triggers.list = new_list;
+    schedule->triggers.count = new_count;
+    schedule->next_scheduled_time_utc = 0; /* chosen during start */
     schedule->trigger_cb = schedule_config->trigger_cb;
     schedule->timestamp_cb = schedule_config->timestamp_cb;
     schedule->priv_data = schedule_config->priv_data;
     schedule->validity = schedule_config->validity;
-    esp_schedule_nvs_add(schedule);
+
+    /* Calculate trigger timestamps once */
+    for (uint8_t i = 0; i < schedule->triggers.count; i++) {
+        esp_schedule_trigger_t *tr = &schedule->triggers.list[i];
+        esp_schedule_set_next_scheduled_time_utc(schedule->name, tr, &schedule_config->validity);
+    }
+
+    esp_err_t nvs_ret = esp_schedule_nvs_add(schedule);
+    /* INVALID_STATE just means NVS is not enabled at runtime - that is not a
+     * failure to persist. Any other error is a genuine persistence failure: roll
+     * back so the RAM state stays consistent with what is (still) in flash. */
+    if (nvs_ret != ESP_OK && nvs_ret != ESP_ERR_INVALID_STATE) {
+        if (new_list) {
+            free(new_list);
+        }
+        schedule->triggers = old_triggers;
+        schedule->validity = old_validity;
+        schedule->trigger_cb = old_trigger_cb;
+        schedule->timestamp_cb = old_timestamp_cb;
+        schedule->priv_data = old_priv_data;
+        schedule->next_scheduled_time_utc = old_next;
+        return nvs_ret;
+    }
+
+    /* Success: the change stuck, so the old trigger list can be released. */
+    if (old_triggers.list) {
+        free(old_triggers.list);
+    }
     return ESP_OK;
 }
 
@@ -636,13 +732,39 @@ esp_err_t esp_schedule_edit(esp_schedule_handle_t handle, esp_schedule_config_t 
         return ESP_FAIL;
     }
 
-    /* Editing a schedule with relative time should also reset it. */
-    if (schedule->trigger.type == ESP_SCHEDULE_TYPE_RELATIVE) {
-        schedule->trigger.next_scheduled_time_utc = 0;
+    /* Reset chosen trigger timestamp; it will be recomputed */
+    schedule->next_scheduled_time_utc = 0;
+    esp_err_t ret = esp_schedule_set(schedule, schedule_config);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to edit schedule %s (error %d)", schedule->name, (int)ret);
+        return ret;
     }
-    esp_schedule_set(schedule, schedule_config);
     ESP_LOGD(TAG, "Schedule %s edited", schedule->name);
     return ESP_OK;
+}
+
+static void esp_schedule_free_schedule(esp_schedule_t *schedule)
+{
+    if (schedule == NULL) {
+        return;
+    }
+    if (schedule->timer) {
+        esp_schedule_stop_timer(schedule);
+        esp_schedule_delete_timer(schedule);
+    }
+    if (schedule->triggers.list) {
+        free(schedule->triggers.list);
+        schedule->triggers.list = NULL;
+        schedule->triggers.count = 0;
+    }
+    free(schedule);
+}
+
+static void esp_schedule_free_all_schedules(esp_schedule_handle_t *handle_list, uint8_t schedule_count)
+{
+    for (uint8_t i = 0; i < schedule_count; i++) {
+        esp_schedule_free_schedule(handle_list[i]);
+    }
 }
 
 esp_err_t esp_schedule_delete(esp_schedule_handle_t handle)
@@ -652,42 +774,94 @@ esp_err_t esp_schedule_delete(esp_schedule_handle_t handle)
     }
     esp_schedule_t *schedule = (esp_schedule_t *)handle;
     ESP_LOGI(TAG, "Deleting schedule %s", schedule->name);
-    if (schedule->timer) {
-        esp_schedule_stop_timer(schedule);
-        esp_schedule_delete_timer(schedule);
-    }
     esp_schedule_nvs_remove(schedule);
-    free(schedule);
+    esp_schedule_free_schedule(schedule);
     return ESP_OK;
 }
 
-esp_schedule_handle_t esp_schedule_create(esp_schedule_config_t *schedule_config)
+esp_err_t esp_schedule_delete_all(esp_schedule_handle_t *handle_list, uint8_t schedule_count)
 {
-    if (schedule_config == NULL) {
-        return NULL;
+    esp_schedule_nvs_remove_all();
+    esp_schedule_free_all_schedules(handle_list, schedule_count);
+    return ESP_OK;
+}
+
+esp_err_t esp_schedule_create(const esp_schedule_config_t *schedule_config, esp_schedule_handle_t *handle_out)
+{
+    if (schedule_config == NULL || handle_out == NULL) {
+        return ESP_ERR_INVALID_ARG;
     }
     if (strlen(schedule_config->name) <= 0) {
         ESP_LOGE(TAG, "Set schedule failed. Please enter a unique valid name for the schedule.");
-        return NULL;
+        return ESP_ERR_INVALID_ARG;
     }
 
-    if (schedule_config->trigger.type == ESP_SCHEDULE_TYPE_INVALID) {
-        ESP_LOGE(TAG, "Schedule type is invalid.");
-        return NULL;
+    /* Validate at least one trigger present */
+    if (schedule_config->triggers.count == 0 || schedule_config->triggers.list == NULL) {
+        ESP_LOGE(TAG, "Schedule must have at least one trigger.");
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    /* Reject invalid trigger types up front. An INVALID (e.g. zero-initialized)
+     * trigger can never compute a next occurrence, so it would otherwise be
+     * accepted as a valid handle that silently never fires (and be persisted as
+     * a permanent no-op that reloads on every boot). */
+    for (uint8_t i = 0; i < schedule_config->triggers.count; i++) {
+        if (schedule_config->triggers.list[i].type == ESP_SCHEDULE_TYPE_INVALID) {
+            ESP_LOGE(TAG, "Trigger %u of schedule %s has an invalid type.", i, schedule_config->name);
+            return ESP_ERR_INVALID_ARG;
+        }
     }
 
     esp_schedule_t *schedule = (esp_schedule_t *)MEM_CALLOC_EXTRAM(1, sizeof(esp_schedule_t));
     if (schedule == NULL) {
         ESP_LOGE(TAG, "Could not allocate handle");
-        return NULL;
+        return ESP_ERR_NO_MEM;
     }
     strlcpy(schedule->name, schedule_config->name, sizeof(schedule->name));
 
-    esp_schedule_set(schedule, schedule_config);
+    esp_err_t ret = esp_schedule_set(schedule, (esp_schedule_config_t *)schedule_config);
+    if (ret != ESP_OK) {
+        /* esp_schedule_set may have allocated the trigger list before failing
+         * (e.g. persistence error), so free the whole schedule, not just the handle. */
+        esp_schedule_free_schedule(schedule);
+        return ret;
+    }
 
-    esp_schedule_create_timer(schedule);
+    *handle_out = (esp_schedule_handle_t)schedule;
     ESP_LOGD(TAG, "Schedule %s created", schedule->name);
-    return (esp_schedule_handle_t)schedule;
+    return ESP_OK;
+}
+
+esp_err_t esp_schedule_set_trigger_callback(esp_schedule_handle_t handle, esp_schedule_trigger_cb_t trigger_cb)
+{
+    if (handle == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    esp_schedule_t *schedule = (esp_schedule_t *)handle;
+    schedule->trigger_cb = trigger_cb;
+    return ESP_OK;
+}
+
+esp_err_t esp_schedule_set_timestamp_callback(esp_schedule_handle_t handle, esp_schedule_timestamp_cb_t timestamp_cb)
+{
+    if (handle == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    esp_schedule_t *schedule = (esp_schedule_t *)handle;
+    schedule->timestamp_cb = timestamp_cb;
+    return ESP_OK;
+}
+
+/* Returns true only if all triggers of the schedule are expired (no future occurrence). */
+static bool esp_schedule_is_expired(esp_schedule_t *schedule)
+{
+    for (uint8_t i = 0; i < schedule->triggers.count; i++) {
+        if (esp_schedule_set_next_scheduled_time_utc(schedule->name, &schedule->triggers.list[i], &schedule->validity)) {
+            return false; /* If any trigger has a future occurrence, the schedule is not expired */
+        }
+    }
+    return true;
 }
 
 esp_schedule_handle_t *esp_schedule_init(bool enable_nvs, char *nvs_partition, uint8_t *schedule_count)
@@ -700,6 +874,7 @@ esp_schedule_handle_t *esp_schedule_init(bool enable_nvs, char *nvs_partition, u
     }
 
     if (!enable_nvs) {
+        init_done = true;
         return NULL;
     }
 
@@ -719,31 +894,28 @@ esp_schedule_handle_t *esp_schedule_init(bool enable_nvs, char *nvs_partition, u
     handle_list = esp_schedule_nvs_get_all(schedule_count);
     if (handle_list == NULL) {
         ESP_LOGI(TAG, "No schedules found in NVS");
+        init_done = true;
         return NULL;
     }
     ESP_LOGI(TAG, "Schedules found in NVS: %"PRIu8, *schedule_count);
-    /* Start/Delete the schedules */
+    /* Start/Delete the schedules. Iterate downwards so a swap-removal of an
+     * expired schedule only moves an already-processed entry into the slot. */
     esp_schedule_t *schedule = NULL;
-    for (size_t handle_count = 0; handle_count < *schedule_count; handle_count++) {
+    for (int handle_count = *schedule_count - 1; handle_count >= 0; handle_count--) {
         schedule = (esp_schedule_t *)handle_list[handle_count];
         schedule->trigger_cb = NULL;
         schedule->timestamp_cb = NULL;
         schedule->timer = NULL;
-        /* Check for ONCE and expired schedules and delete them. A schedule with
-         * no valid future occurrence (already-fired one-shot, or a year bounded
-         * in the past) is expired. */
-        bool has_future = esp_schedule_set_next_scheduled_time_utc(schedule->name, &schedule->trigger, &schedule->validity);
-        if (!has_future) {
-            /* This schedule has already expired. */
+        /* Check for ONCE and expired schedules and delete them. */
+        if (esp_schedule_is_expired(schedule)) {
             ESP_LOGI(TAG, "Schedule %s does not repeat and has already expired. Deleting it.", schedule->name);
             esp_schedule_delete((esp_schedule_handle_t)schedule);
-            /* Removing the schedule from the list */
+            /* Removing the schedule from the list by swapping in the last entry. */
             handle_list[handle_count] = handle_list[*schedule_count - 1];
+            handle_list[*schedule_count - 1] = NULL;
             (*schedule_count)--;
-            handle_count--;
             continue;
         }
-        esp_schedule_create_timer(schedule);
         esp_schedule_start_timer(schedule);
     }
     init_done = true;

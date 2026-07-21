@@ -25,8 +25,10 @@
 
 typedef struct esp_schedule {
     char name[MAX_SCHEDULE_NAME_LEN + 1];
-    esp_schedule_trigger_t trigger;
+    /* List of triggers associated with this schedule. We deep-copy from config. */
+    esp_schedule_trigger_list_t triggers;
     uint32_t next_scheduled_time_diff;
+    time_t next_scheduled_time_utc;
     TimerHandle_t timer;
     esp_schedule_trigger_cb_t trigger_cb;
     esp_schedule_timestamp_cb_t timestamp_cb;
@@ -34,12 +36,33 @@ typedef struct esp_schedule {
     esp_schedule_validity_t validity;
 } esp_schedule_t;
 
+/* On-disk format version for the persisted schedule blob. Bump whenever the
+ * layout of esp_schedule_persistent_t or esp_schedule_trigger_t changes in a
+ * way that is not backward compatible, so stale blobs are rejected (or
+ * migrated) on read. */
+#define ESP_SCHEDULE_NVS_FORMAT_VERSION 2
+
+/* Persistent header for NVS storage. The trigger list is stored immediately
+ * after this header. Runtime-only and runtime-derived fields (live pointers,
+ * timer handle, callbacks, and the next-fire countdown which is recomputed on
+ * every arm) are intentionally excluded: persisting them is meaningless across
+ * reboots and makes the format depend on pointer width and padding. */
+typedef struct esp_schedule_persistent {
+    uint8_t version;        /* ESP_SCHEDULE_NVS_FORMAT_VERSION */
+    uint8_t trigger_count;  /* number of triggers stored after this header */
+    uint16_t trigger_size;  /* sizeof(esp_schedule_trigger_t) when written */
+    char name[MAX_SCHEDULE_NAME_LEN + 1];
+    time_t next_scheduled_time_utc;
+    esp_schedule_validity_t validity;
+} esp_schedule_persistent_t;
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 esp_err_t esp_schedule_nvs_add(esp_schedule_t *schedule);
 esp_err_t esp_schedule_nvs_remove(esp_schedule_t *schedule);
+esp_err_t esp_schedule_nvs_remove_all(void);
 esp_schedule_handle_t *esp_schedule_nvs_get_all(uint8_t *schedule_count);
 bool esp_schedule_nvs_is_enabled(void);
 esp_err_t esp_schedule_nvs_init(char *nvs_partition);
