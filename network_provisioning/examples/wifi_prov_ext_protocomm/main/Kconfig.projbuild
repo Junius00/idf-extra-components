@@ -23,6 +23,16 @@ menu "Example Configuration"
             Display the provisioning QR code as ASCII art on the serial terminal
             in addition to printing the URL.
 
+    config EXAMPLE_BOOT_BUTTON_GPIO
+        int "GPIO of the BOOT button"
+        default 28 if IDF_TARGET_ESP32C5
+        default 9 if IDF_TARGET_ESP32C3 || IDF_TARGET_ESP32C6 || IDF_TARGET_ESP32C2 || IDF_TARGET_ESP32H2
+        default 0
+        help
+            The example pauses the session once the device joins the network.
+            A press of this button toggles the session between paused and
+            resumed. GPIO 0 is the BOOT button on most development boards.
+
     config EXAMPLE_RESET_PROVISIONED
         bool
         default n

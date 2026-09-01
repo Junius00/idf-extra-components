@@ -16,6 +16,11 @@
    network_prov_mgr_endpoint_create() on NETWORK_PROV_INIT and
    network_prov_mgr_endpoint_register() on NETWORK_PROV_START.
 
+   The example never calls network_prov_mgr_deinit(); that would tear the kept
+   alive transport down. It pauses the session once the device joins the
+   network, which stops advertising to remove its coexistence cost while the
+   session stays usable. The BOOT button toggles pause and resume.
+
    This example code is in the Public Domain (or CC0 licensed, at your option.)
 
    Unless required by applicable law or agreed to in writing, this software is
@@ -33,6 +38,8 @@
 #include <esp_log.h>
 #include <esp_wifi.h>
 #include <esp_event.h>
+#include "iot_button.h"
+#include "button_gpio.h"
 #include <nvs_flash.h>
 
 #include <network_provisioning/manager.h>
@@ -40,6 +47,22 @@
 #include "qrcode.h"
 
 static const char *TAG = "session_only_prov";
+
+#define BOOT_BUTTON_GPIO    CONFIG_EXAMPLE_BOOT_BUTTON_GPIO
+
+/* Runs on the esp_timer task, where iot_button dispatches its callbacks. */
+static void button_click_cb(void *button_handle, void *usr_data)
+{
+    esp_err_t err;
+
+    if (network_prov_mgr_session_is_paused()) {
+        err = network_prov_mgr_session_resume();
+        ESP_LOGI(TAG, "Resume session: %s", esp_err_to_name(err));
+    } else {
+        err = network_prov_mgr_session_pause();
+        ESP_LOGI(TAG, "Pause session: %s", esp_err_to_name(err));
+    }
+}
 
 #define EXAMPLE_POP          "abcd1234"
 #define PROV_QR_VERSION      "v1"
@@ -141,6 +164,15 @@ static void prov_event_handler(void *arg, esp_event_base_t event_base,
         ip_event_got_ip_t *evt = (ip_event_got_ip_t *)event_data;
         ESP_LOGI(TAG, "Got IP: " IPSTR, IP2STR(&evt->ip_info.ip));
         xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
+
+        /* The network is up, so stop advertising. The session, its endpoints
+         * and the security context stay alive for an immediate resume. */
+        esp_err_t err = network_prov_mgr_session_pause();
+        if (err == ESP_OK) {
+            ESP_LOGI(TAG, "Session paused. Press the BOOT button to resume.");
+        } else {
+            ESP_LOGW(TAG, "Failed to pause session: %s", esp_err_to_name(err));
+        }
     }
 }
 
@@ -156,6 +188,16 @@ void app_main(void)
     ESP_ERROR_CHECK(ret);
 
     s_wifi_event_group = xEventGroupCreate();
+
+    const button_config_t btn_cfg = {0};
+    const button_gpio_config_t btn_gpio_cfg = {
+        .gpio_num = BOOT_BUTTON_GPIO,
+        .active_level = 0,
+    };
+    button_handle_t btn = NULL;
+    ESP_ERROR_CHECK(iot_button_new_gpio_device(&btn_cfg, &btn_gpio_cfg, &btn));
+    ESP_ERROR_CHECK(iot_button_register_cb(btn, BUTTON_SINGLE_CLICK, NULL,
+                                           button_click_cb, NULL));
 
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
@@ -188,13 +230,13 @@ void app_main(void)
      * In this mode, only prov-session and proto-ver are registered on the
      * BLE transport.  No provisioning state machine is active by default.
      *
-     * When using SCHEME_BLE_EVENT_HANDLER_FREE_BLE the BT classic memory is
-     * freed after provisioning; use NONE to keep full BT available.
+     * FREE_BT releases only the classic BT memory. Do not use FREE_BLE here:
+     * it releases the BLE memory, which a resumable session still needs.
      * --------------------------------------------------------------------- */
     network_prov_mgr_config_t config = {
         .scheme               = network_prov_scheme_ble,
         .mode                 = NETWORK_PROV_MODE_SESSION_ONLY,
-        .scheme_event_handler = NETWORK_PROV_SCHEME_BLE_EVENT_HANDLER_FREE_BLE,
+        .scheme_event_handler = NETWORK_PROV_SCHEME_BLE_EVENT_HANDLER_FREE_BT,
         .app_event_handler    = NETWORK_PROV_EVENT_HANDLER_NONE,
     };
     ESP_ERROR_CHECK(network_prov_mgr_init(config));
@@ -224,7 +266,8 @@ void app_main(void)
                             NETWORK_PROV_SECURITY_1, EXAMPLE_POP, service_name, NULL));
     }
 
-    network_prov_mgr_deinit();
+    /* No network_prov_mgr_deinit() here: it would stop the transport and free
+     * the session that this example exists to keep. */
 
     esp_wifi_connect();
     xEventGroupWaitBits(s_wifi_event_group, WIFI_CONNECTED_BIT,
