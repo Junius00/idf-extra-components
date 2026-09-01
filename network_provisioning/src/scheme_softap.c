@@ -182,6 +182,10 @@ const network_prov_scheme_t network_prov_scheme_softap = {
     .delete_config       = delete_config,
     .set_config_service  = set_config_service,
     .set_config_endpoint = set_config_endpoint,
+    /* No prov_pause/prov_resume: no public API stops SoftAP beacons without
+     * also stopping the AP netif, the DHCP server and associated stations. */
+    .prov_pause          = NULL,
+    .prov_resume         = NULL,
 #ifdef CONFIG_NETWORK_PROV_NETWORK_TYPE_WIFI
     .wifi_mode           = WIFI_MODE_APSTA
 #endif

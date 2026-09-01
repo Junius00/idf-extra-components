@@ -193,6 +193,20 @@ typedef struct network_prov_scheme {
      */
     esp_err_t (*set_config_endpoint) (void *config, const char *endpoint_name, uint16_t uuid);
 
+    /**
+     * Optional. Function which is to be called by the manager to stop making the
+     * device discoverable, without stopping the transport. May be NULL, in which
+     * case network_prov_mgr_session_pause() returns ESP_ERR_NOT_SUPPORTED
+     */
+    esp_err_t (*prov_pause) (protocomm_t *pc);
+
+    /**
+     * Optional. Function which is to be called by the manager to make the device
+     * discoverable again after prov_pause(). May be NULL, in which case
+     * network_prov_mgr_session_resume() returns ESP_ERR_NOT_SUPPORTED
+     */
+    esp_err_t (*prov_resume) (protocomm_t *pc);
+
 #ifdef CONFIG_NETWORK_PROV_NETWORK_TYPE_WIFI
     /**
      * Sets mode of operation of Wi-Fi during provisioning
@@ -605,6 +619,58 @@ esp_err_t network_prov_mgr_enable_provisioning(void);
  * @return  NETWORK_PROV_MODE_FULL or NETWORK_PROV_MODE_SESSION_ONLY
  */
 network_prov_mode_t network_prov_mgr_get_mode(void);
+
+/**
+ * @brief   Stop making the device discoverable, keeping the session alive
+ *
+ * Stops the announcement that lets a client find the device, and nothing else.
+ * The transport stays up. The protocomm session, the registered endpoints, the
+ * security context, the pairing information and any live connection are left
+ * untouched, so a resume is immediate and needs no re-pairing.
+ *
+ * Use this to remove the continuous radio cost of being discoverable while the
+ * device stays connectable on demand, for example after it joins the network.
+ *
+ * The call is idempotent.
+ *
+ * Transport support:
+ * - BLE: supported on both the NimBLE and the Bluedroid host. Pause stops
+ *   advertising and resume restarts it.
+ * - SoftAP: not supported. No public API stops the beacon without also stopping
+ *   the AP interface and its associated stations.
+ * - Console: not supported. A UART console has no discoverability.
+ *
+ * @note Do not call this from the app_event_handler callback registered in
+ *       network_prov_mgr_config_t. That callback runs with the manager lock
+ *       held. Use an esp_event handler for NETWORK_PROV_EVENT instead.
+ *
+ * @return
+ *  - ESP_OK                : Success
+ *  - ESP_ERR_NOT_SUPPORTED : The active scheme cannot pause discovery
+ *  - ESP_ERR_INVALID_STATE : No transport is running
+ */
+esp_err_t network_prov_mgr_session_pause(void);
+
+/**
+ * @brief   Make the device discoverable again after network_prov_mgr_session_pause()
+ *
+ * Restores discoverability with the parameters the transport was started with.
+ * The call is idempotent. See network_prov_mgr_session_pause() for transport
+ * support and for the restriction on where it may be called from.
+ *
+ * @return
+ *  - ESP_OK                : Success
+ *  - ESP_ERR_NOT_SUPPORTED : The active scheme cannot pause discovery
+ *  - ESP_ERR_INVALID_STATE : No transport is running
+ */
+esp_err_t network_prov_mgr_session_resume(void);
+
+/**
+ * @brief   Check whether discovery is currently paused
+ *
+ * @return  true if paused, false if discoverable or if no transport is running
+ */
+bool network_prov_mgr_session_is_paused(void);
 
 /**
  * @brief   Create an additional endpoint and allocate internal resources for it

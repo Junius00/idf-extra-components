@@ -14,6 +14,17 @@
 #include <protocomm.h>
 #include <protocomm_ble.h>
 
+#include <esp_timer.h>
+
+#ifdef CONFIG_BT_NIMBLE_ENABLED
+#include "host/ble_gap.h"
+#include "host/ble_hs.h"
+#endif
+
+#ifdef CONFIG_BT_BLUEDROID_ENABLED
+#include "esp_gap_ble_api.h"
+#endif
+
 #include "network_provisioning/scheme_ble.h"
 #include "network_provisioning_priv.h"
 
@@ -29,6 +40,150 @@ static uint8_t custom_keep_ble_on;
 
 static uint8_t *custom_manufacturer_data;
 static size_t custom_manufacturer_data_len;
+
+#ifdef CONFIG_BT_NIMBLE_ENABLED
+
+static esp_err_t adv_stop(void)
+{
+    int rc = ble_gap_adv_stop();
+    if (rc != 0 && rc != BLE_HS_EALREADY) {
+        ESP_LOGE(TAG, "Failed to stop advertising; rc = %d", rc);
+        return (rc == BLE_HS_EDISABLED) ? ESP_ERR_INVALID_STATE : ESP_FAIL;
+    }
+    return ESP_OK;
+}
+
+static esp_err_t adv_start(void)
+{
+    if (ble_gap_adv_active()) {
+        return ESP_OK;
+    }
+
+    if (!ble_hs_cfg.sync_cb) {
+        ESP_LOGE(TAG, "BLE host sync callback unavailable");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    /* Advertise through protocomm's own sync handler, so the restart keeps its
+     * GAP callback and advertising data. */
+    ble_hs_cfg.sync_cb();
+
+    if (!ble_gap_adv_active()) {
+        /* Expected while a client is still connected; protocomm re-advertises
+         * on disconnect now that the pause is cleared. */
+        ESP_LOGW(TAG, "Advertising not active after resume");
+    }
+    return ESP_OK;
+}
+
+#endif // CONFIG_BT_NIMBLE_ENABLED
+
+#ifdef CONFIG_BT_BLUEDROID_ENABLED
+
+static esp_err_t adv_stop(void)
+{
+    esp_err_t err = esp_ble_gap_stop_advertising();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to stop advertising: %s", esp_err_to_name(err));
+    }
+    return err;
+}
+
+static esp_err_t adv_start(void)
+{
+    /* Mirrors the advertising parameters protocomm starts with */
+    esp_ble_adv_params_t adv_params = {
+        .adv_int_min       = 0x100,
+        .adv_int_max       = 0x100,
+        .adv_type          = ADV_TYPE_IND,
+        .own_addr_type     = BLE_ADDR_TYPE_PUBLIC,
+        .channel_map       = ADV_CHNL_ALL,
+        .adv_filter_policy = ADV_FILTER_ALLOW_SCAN_ANY_CON_ANY,
+    };
+
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 4, 0)
+    if (custom_ble_addr) {
+        adv_params.own_addr_type = BLE_ADDR_TYPE_RANDOM;
+    }
+#endif // ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 4, 0)
+
+    esp_err_t err = esp_ble_gap_start_advertising(&adv_params);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to start advertising: %s", esp_err_to_name(err));
+    }
+    return err;
+}
+
+#endif // CONFIG_BT_BLUEDROID_ENABLED
+
+/* Delay before re-asserting the pause, so it lands after protocomm restarts
+ * advertising from its own disconnect handler. */
+#define REPAUSE_DELAY_US    50000
+
+static bool s_adv_paused;
+static esp_timer_handle_t s_repause_timer;
+
+static void repause_timer_cb(void *arg)
+{
+    if (s_adv_paused) {
+        adv_stop();
+    }
+}
+
+static void transport_disconnect_handler(void *arg, esp_event_base_t event_base,
+        int32_t event_id, void *event_data)
+{
+    if (s_adv_paused && s_repause_timer) {
+        esp_timer_stop(s_repause_timer);
+        esp_timer_start_once(s_repause_timer, REPAUSE_DELAY_US);
+    }
+}
+
+static esp_err_t adv_pause(protocomm_t *pc)
+{
+    if (!s_repause_timer) {
+        const esp_timer_create_args_t timer_args = {
+            .callback = repause_timer_cb,
+            .name = "prov_repause"
+        };
+        esp_err_t err = esp_timer_create(&timer_args, &s_repause_timer);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to create re-pause timer: %s", esp_err_to_name(err));
+            return err;
+        }
+    }
+
+    esp_err_t err = esp_event_handler_register(PROTOCOMM_TRANSPORT_BLE_EVENT,
+                    PROTOCOMM_TRANSPORT_BLE_DISCONNECTED,
+                    transport_disconnect_handler, NULL);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to register transport event handler: %s", esp_err_to_name(err));
+        return err;
+    }
+
+    s_adv_paused = true;
+
+    err = adv_stop();
+    if (err != ESP_OK) {
+        s_adv_paused = false;
+        esp_event_handler_unregister(PROTOCOMM_TRANSPORT_BLE_EVENT,
+                                     PROTOCOMM_TRANSPORT_BLE_DISCONNECTED,
+                                     transport_disconnect_handler);
+    }
+    return err;
+}
+
+static esp_err_t adv_resume(protocomm_t *pc)
+{
+    s_adv_paused = false;
+    if (s_repause_timer) {
+        esp_timer_stop(s_repause_timer);
+    }
+    esp_event_handler_unregister(PROTOCOMM_TRANSPORT_BLE_EVENT,
+                                 PROTOCOMM_TRANSPORT_BLE_DISCONNECTED,
+                                 transport_disconnect_handler);
+    return adv_start();
+}
 
 static esp_err_t prov_start(protocomm_t *pc, void *config)
 {
@@ -68,6 +223,8 @@ static esp_err_t prov_start(protocomm_t *pc, void *config)
         ESP_LOGE(TAG, "Failed to start protocomm BLE service");
         return ESP_FAIL;
     }
+
+    s_adv_paused = false;
     return ESP_OK;
 }
 
@@ -338,6 +495,8 @@ const network_prov_scheme_t network_prov_scheme_ble = {
     .delete_config       = delete_config,
     .set_config_service  = set_config_service,
     .set_config_endpoint = set_config_endpoint,
+    .prov_pause          = adv_pause,
+    .prov_resume         = adv_resume,
 #ifdef CONFIG_NETWORK_PROV_NETWORK_TYPE_WIFI
     .wifi_mode           = WIFI_MODE_STA
 #endif

@@ -117,6 +117,10 @@ struct network_prov_mgr_ctx {
      * network_prov_mgr_enable_provisioning() in SESSION_ONLY mode. */
     bool prov_endpoints_enabled;
 
+    /* True while the transport is running but not discoverable, after
+     * network_prov_mgr_session_pause(). */
+    bool session_paused;
+
     /* Type of security to use with protocomm */
     int security;
 
@@ -682,6 +686,7 @@ static void prov_stop_and_notify(bool is_async)
          * removed automatically when prov_stop is called */
         prov_ctx->mgr_config.scheme.prov_stop(prov_ctx->pc);
         protocomm_delete(prov_ctx->pc);
+        prov_ctx->session_paused = false;
     }
     prov_ctx->pc = NULL;
 
@@ -959,6 +964,92 @@ exit:
 network_prov_mode_t network_prov_mgr_get_mode(void)
 {
     return s_mgr_mode;
+}
+
+/* Resolve the running transport. After the SESSION_ONLY auto-stop the handle is
+ * moved to session_pc, so pc alone is not enough. Call with the lock held. */
+static protocomm_t *session_transport_handle(void)
+{
+    if (!prov_ctx) {
+        return NULL;
+    }
+    return prov_ctx->pc ? prov_ctx->pc : prov_ctx->session_pc;
+}
+
+/* Common body for pause and resume. The scheme call is made after releasing the
+ * context lock, because it enters the host stack, whose task takes the same lock
+ * from the protocomm endpoint handlers. */
+static esp_err_t session_set_paused(bool paused)
+{
+    if (!prov_ctx_lock) {
+        ESP_LOGE(TAG, "Provisioning manager not initialized");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    ACQUIRE_LOCK(prov_ctx_lock);
+
+    if (!prov_ctx ||
+            prov_ctx->prov_state == NETWORK_PROV_STATE_STARTING ||
+            prov_ctx->prov_state == NETWORK_PROV_STATE_STOPPING) {
+        RELEASE_LOCK(prov_ctx_lock);
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    protocomm_t *pc = session_transport_handle();
+    if (!pc) {
+        ESP_LOGE(TAG, "No transport running");
+        RELEASE_LOCK(prov_ctx_lock);
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    esp_err_t (*scheme_fn)(protocomm_t *pc) = paused ?
+            prov_ctx->mgr_config.scheme.prov_pause :
+            prov_ctx->mgr_config.scheme.prov_resume;
+    if (!scheme_fn) {
+        RELEASE_LOCK(prov_ctx_lock);
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+
+    prov_ctx->session_paused = paused;
+    RELEASE_LOCK(prov_ctx_lock);
+
+    esp_err_t ret = scheme_fn(pc);
+
+    if (ret != ESP_OK) {
+        ACQUIRE_LOCK(prov_ctx_lock);
+        if (prov_ctx) {
+            prov_ctx->session_paused = !paused;
+        }
+        RELEASE_LOCK(prov_ctx_lock);
+        ESP_LOGE(TAG, "Failed to %s session: %s", paused ? "pause" : "resume",
+                 esp_err_to_name(ret));
+        return ret;
+    }
+
+    ESP_LOGI(TAG, "Session %s", paused ? "paused" : "resumed");
+    return ESP_OK;
+}
+
+esp_err_t network_prov_mgr_session_pause(void)
+{
+    return session_set_paused(true);
+}
+
+esp_err_t network_prov_mgr_session_resume(void)
+{
+    return session_set_paused(false);
+}
+
+bool network_prov_mgr_session_is_paused(void)
+{
+    if (!prov_ctx_lock) {
+        return false;
+    }
+
+    ACQUIRE_LOCK(prov_ctx_lock);
+    bool paused = prov_ctx && prov_ctx->session_paused && session_transport_handle();
+    RELEASE_LOCK(prov_ctx_lock);
+    return paused;
 }
 
 /* Call this if provisioning is completed before the timeout occurs */
@@ -2145,6 +2236,7 @@ esp_err_t network_prov_mgr_deinit(void)
         prov_ctx->mgr_config.scheme.prov_stop(prov_ctx->session_pc);
         protocomm_delete(prov_ctx->session_pc);
         prov_ctx->session_pc = NULL;
+        prov_ctx->session_paused = false;
         /* Free the PoP that was kept alive so the security handler could serve
          * local-control sessions. Safe to free now that BLE is stopped. */
         if (prov_ctx->protocomm_sec_params) {
