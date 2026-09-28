@@ -9,6 +9,6 @@ This primarily consists of two examples `wifi_prov` and `thread_prov`, plus `wif
     Abstracts out most of the complexity of Thread provisioning over BLE transport. It also demonstrates how applications can register and use additional custom data endpoints.
 
 * wifi_prov_ext_protocomm
-    Demonstrates session-only mode, which keeps the protocomm transport alive after provisioning so that the application can reuse the secure session. It also demonstrates session pause and resume, which stop and restart BLE advertising without touching the session.
+    Demonstrates session-only mode, which keeps the protocomm transport alive after provisioning so that the application can reuse the secure session.
 
 Provisioning applications are available for `Linux / Windows / macOS` platform as `esp_prov.py` [script](../tool/esp_prov/esp_prov.py)
