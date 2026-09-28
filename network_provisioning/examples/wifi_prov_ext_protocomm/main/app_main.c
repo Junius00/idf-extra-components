@@ -188,13 +188,13 @@ void app_main(void)
      * In this mode, only prov-session and proto-ver are registered on the
      * BLE transport.  No provisioning state machine is active by default.
      *
-     * When using SCHEME_BLE_EVENT_HANDLER_FREE_BLE the BT classic memory is
-     * freed after provisioning; use NONE to keep full BT available.
+     * FREE_BT releases only the classic BT memory. Do not use FREE_BLE here:
+     * it releases the BLE memory, which the kept alive session still needs.
      * --------------------------------------------------------------------- */
     network_prov_mgr_config_t config = {
         .scheme               = network_prov_scheme_ble,
         .mode                 = NETWORK_PROV_MODE_SESSION_ONLY,
-        .scheme_event_handler = NETWORK_PROV_SCHEME_BLE_EVENT_HANDLER_FREE_BLE,
+        .scheme_event_handler = NETWORK_PROV_SCHEME_BLE_EVENT_HANDLER_FREE_BT,
         .app_event_handler    = NETWORK_PROV_EVENT_HANDLER_NONE,
     };
     ESP_ERROR_CHECK(network_prov_mgr_init(config));
@@ -224,7 +224,8 @@ void app_main(void)
                             NETWORK_PROV_SECURITY_1, EXAMPLE_POP, service_name, NULL));
     }
 
-    network_prov_mgr_deinit();
+    /* No network_prov_mgr_deinit() here: it would stop the transport and free
+     * the session that this example exists to keep. */
 
     esp_wifi_connect();
     xEventGroupWaitBits(s_wifi_event_group, WIFI_CONNECTED_BIT,
